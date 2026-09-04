@@ -1,5 +1,3 @@
-# manifests/05-taxdocs-dev.external-datastores.yaml
-#
 # Local-cluster-only bridge: yesterday's Compose stack (postgres/redis/kafka)
 # runs as plain Docker containers on the host, not in this k3d cluster. These
 # Service + Endpoints pairs (no selector -- manually managed) give the pods in
@@ -31,7 +29,7 @@ metadata:
   namespace: taxdocs-dev
 subsets:
   - addresses:
-      - ip: 172.20.0.6
+      - ip: 172.19.0.2
     ports:
       - name: postgres
         port: 5432
@@ -59,7 +57,7 @@ metadata:
   namespace: taxdocs-dev
 subsets:
   - addresses:
-      - ip: 172.20.0.7
+      - ip: 172.19.0.4
     ports:
       - name: mongo
         port: 27017
@@ -87,7 +85,7 @@ metadata:
   namespace: taxdocs-dev
 subsets:
   - addresses:
-      - ip: 172.20.0.5
+      - ip: 172.19.0.3
     ports:
       - name: redis
         port: 6379
@@ -115,7 +113,7 @@ metadata:
   namespace: taxdocs-dev
 subsets:
   - addresses:
-      - ip: 172.20.0.8
+      - ip: 172.19.0.5
     ports:
       - name: kafka
         port: 9092
