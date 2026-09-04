@@ -1,0 +1,72 @@
+# The dev overlay -- the smallest viable patch over the W5 D3 base.
+# Same shape repeats at overlays/staging/ and overlays/prod/ with
+# different namespace + replica + image-tag patches.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind:       Kustomization
+
+# Base: the unchanged W5 D3 manifests, copied verbatim into the
+# config repo at base/. Kept identical across envs.
+resources:
+  - ../../base
+  # Local-cluster-only bridge Services/Endpoints for the Compose-managed
+  # postgres/redis/kafka/mongo containers -- dev-only, never in base since
+  # staging/prod must not inherit these hardcoded container IPs.
+  - 05-taxdocs-dev.external-datastores.yaml
+
+# Per-env namespace -- Kustomize rewrites every resource's
+# metadata.namespace at build time.
+namespace: taxdocs-dev
+
+# Image-tag rewrite -- the CI bump-config workflow rewrites the
+# digest portion only; Kustomize merges it onto the rendered
+# Deployment without touching the base manifest.
+images:
+  - name:    uptimecrew/taxdocs-api
+    newName: uptimecrew/taxdocs-api
+    newTag:  1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f
+
+# Per-env replica count -- dev runs hot at one replica.
+replicas:
+  - name:  taxdocs-api
+    count: 1
+
+# Per-env config patch -- override the W5 D3 ConfigMap entries
+# that should differ between envs (Spring profile, log level,
+# feature flags).
+#
+# Sync-wave annotations: commonAnnotations can't express this -- it stamps
+# the SAME value onto every resource, so Namespace/ConfigMap/Deployment would
+# all land in one wave together instead of staggered. Each kind needs its own
+# JSON Patch op targeting only that resource. `~1` escapes the `/` in
+# argocd.argoproj.io/sync-wave (JSON Pointer syntax, RFC 6901). Namespace and
+# ConfigMap sync in wave -1 (before anything else); Deployment is unannotated
+# and defaults to wave 0, landing after -- so a first-time sync to a new
+# namespace converges in one pass instead of the Deployment racing a
+# not-yet-created Namespace/ConfigMap.
+patches:
+  - target:
+      kind: Namespace
+      name: taxdocs-dev
+    patch: |-
+      - op: add
+        path: /metadata/annotations
+        value: {}
+      - op: add
+        path: /metadata/annotations/argocd.argoproj.io~1sync-wave
+        value: "-1"
+  - target:
+      kind: ConfigMap
+      name: taxdocs-api-config
+    patch: |-
+      - op: replace
+        path: /data/SPRING_PROFILES_ACTIVE
+        value: dev
+      - op: replace
+        path: /data/LOGGING_LEVEL_ROOT
+        value: DEBUG
+      - op: add
+        path: /metadata/annotations
+        value: {}
+      - op: add
+        path: /metadata/annotations/argocd.argoproj.io~1sync-wave
+        value: "-1"

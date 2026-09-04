@@ -1,0 +1,48 @@
+# AppProject: taxdocs
+#
+# Scoped narrowly for the dev cutover (Task 1) -- source is this config repo
+# only, destination is the taxdocs-dev namespace only. Task 2 expands the
+# destinations to staging/prod once those overlays land.
+apiVersion: argoproj.io/v1alpha1
+kind:       AppProject
+metadata:
+  name:      taxdocs
+  namespace: argocd
+spec:
+  description: taxdocs-api GitOps cutover -- pull-based deploys via Argo CD
+
+  sourceRepos:
+    - https://github.com/rashi-bhansali/rashi-bhansali-tax-docs-config.git
+
+  destinations:
+    - namespace: taxdocs-dev
+      server:    https://kubernetes.default.svc
+
+  # Namespace itself must be explicitly whitelisted to be managed by an
+  # Application -- kept auditable here rather than granted implicitly via
+  # the Application's CreateNamespace=true sync option.
+  clusterResourceWhitelist:
+    - group: ""
+      kind:  Namespace
+
+  namespaceResourceWhitelist:
+    - group: ""
+      kind:  ConfigMap
+    - group: ""
+      kind:  Secret
+    - group: ""
+      kind:  Service
+    - group: ""
+      kind:  Endpoints
+    - group: ""
+      kind:  ResourceQuota
+    - group: ""
+      kind:  LimitRange
+    - group: apps
+      kind:  Deployment
+    - group: autoscaling
+      kind:  HorizontalPodAutoscaler
+    - group: networking.k8s.io
+      kind:  Ingress
+    - group: monitoring.coreos.com
+      kind:  ServiceMonitor

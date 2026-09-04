@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: taxdocs-api
+  namespace: taxdocs-dev
+  labels:
+    app.kubernetes.io/name: taxdocs-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: taxdocs-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

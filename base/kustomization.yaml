@@ -1,0 +1,14 @@
+# The unchanged W5 D3 manifests, copied verbatim into the config repo.
+# Kept identical across envs -- per-env differences are patched in overlays/.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind:       Kustomization
+
+resources:
+  - 00-namespace.yaml
+  - 10-taxdocs-api.deployment.yaml
+  - 20-taxdocs-api.service.yaml
+  - 30-taxdocs-api.configmap.yaml
+  - 40-taxdocs-api.secret.yaml
+  - 50-taxdocs-api.hpa.yaml
+  - 60-taxdocs-api.ingress.yaml
+  - 70-taxdocs-api.servicemonitor.yaml

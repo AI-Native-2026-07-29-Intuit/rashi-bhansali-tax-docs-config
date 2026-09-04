@@ -1,0 +1,32 @@
+# Application: taxdocs-api-dev
+#
+# Dev anchor for the GitOps cutover -- replaces CI's kubectl apply with
+# Argo CD pulling overlays/dev from this repo.
+apiVersion: argoproj.io/v1alpha1
+kind:       Application
+metadata:
+  name:      taxdocs-api-dev
+  namespace: argocd
+  finalizers:
+    # Ensures `kubectl delete` on this Application cascades to delete the
+    # resources it manages, instead of orphaning them in the cluster.
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: taxdocs
+
+  source:
+    repoURL:        https://github.com/rashi-bhansali/rashi-bhansali-tax-docs-config.git
+    targetRevision:  w6d2-implementation
+    path:            overlays/dev
+
+  destination:
+    server:    https://kubernetes.default.svc
+    namespace: taxdocs-dev
+
+  syncPolicy:
+    automated:
+      prune:    true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

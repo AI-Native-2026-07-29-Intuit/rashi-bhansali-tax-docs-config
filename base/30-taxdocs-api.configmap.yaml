@@ -1,0 +1,31 @@
+# manifests/30-taxdocs-api.configmap.yaml - non-secret env.
+# Plain key/value pairs. Hostnames are the in-cluster DNS names
+# (<svc>.<namespace>.svc.cluster.local) and resolve to the matching
+# Services. Anything sensitive (passwords, API keys) belongs in the
+# Secret, never here.
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: taxdocs-api-config
+  namespace: taxdocs-dev
+  labels:
+    app.kubernetes.io/name: taxdocs-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+data:
+  SPRING_PROFILES_ACTIVE:         k8s
+  LOGGING_LEVEL_ROOT:             INFO
+  SERVER_PORT:                    "8080"
+  SPRING_DATASOURCE_URL:          jdbc:postgresql://postgres.taxdocs-dev.svc.cluster.local:5432/taxdocs_dev
+  SPRING_DATASOURCE_USERNAME:     taxdocs_dev
+  # Not in the original ref file, but required: DocumentIngestService wires
+  # mongoTemplate eagerly via constructor injection, so the app fails to
+  # start (not just a degraded health subcheck) without a reachable Mongo.
+  SPRING_DATA_MONGODB_URI:        mongodb://mongo.taxdocs-dev.svc.cluster.local:27017/taxdocs
+  SPRING_DATA_REDIS_HOST:         redis.taxdocs-dev.svc.cluster.local
+  SPRING_DATA_REDIS_PORT:         "6379"
+  SPRING_KAFKA_BOOTSTRAP_SERVERS: kafka.taxdocs-dev.svc.cluster.local:9092
+  OTEL_EXPORTER_OTLP_ENDPOINT:    http://otelcol.taxdocs-dev.svc.cluster.local:4317
+  OTEL_SERVICE_NAME:              taxdocs-api
