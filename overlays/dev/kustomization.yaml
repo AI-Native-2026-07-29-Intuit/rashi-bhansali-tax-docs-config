@@ -23,7 +23,7 @@ namespace: taxdocs-dev
 images:
   - name:    uptimecrew/taxdocs-api
     newName: uptimecrew/taxdocs-api
-    newTag:  1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f
+    newTag:  0.1.1
 
 # Per-env replica count -- dev runs hot at one replica.
 replicas:
