@@ -25,10 +25,12 @@ images:
     newName: uptimecrew/taxdocs-api
     newTag:  0.1.1
 
-# No replicas patch here: base/50-taxdocs-api.hpa.yaml (minReplicas: 2) owns
-# spec.replicas for taxdocs-api once the HPA is attached. A Kustomize replicas
-# patch here would fight the HPA every reconcile -- HPA scales back to its
-# floor immediately after each Argo CD sync, showing as perpetual OutOfSync.
+# No Kustomize `replicas:` block here: base/50-taxdocs-api.hpa.yaml owns
+# spec.replicas for taxdocs-api once the HPA is attached, so a separate
+# Kustomize replicas patch would fight it every reconcile -- HPA scales back
+# to its floor immediately after each Argo CD sync, showing as perpetual
+# OutOfSync. Instead, dev's floor is lowered via the HPA patch below so the
+# HPA and Kustomize agree on a resting replica count of 1.
 
 # Per-env config patch -- override the W5 D3 ConfigMap entries
 # that should differ between envs (Spring profile, log level,
@@ -70,3 +72,10 @@ patches:
       - op: add
         path: /metadata/annotations/argocd.argoproj.io~1sync-wave
         value: "-1"
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: taxdocs-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
