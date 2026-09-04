@@ -1,5 +1,5 @@
 # manifests/60-taxdocs-api.ingress.yaml - external reach.
-# k3d ships NGINX as its default ingress controller; the cluster was
+# k3d ships Traefik as its default ingress controller; the cluster was
 # created with --port "8080:80@loadbalancer", so a curl to
 # localhost:8080 with the matching Host header reaches this Ingress.
 # Use `ingressClassName` (NOT the deprecated annotation form).
@@ -15,10 +15,9 @@ metadata:
     app.kubernetes.io/part-of: taxdocs
     app.kubernetes.io/managed-by: kubectl
   annotations:
-    nginx.ingress.kubernetes.io/proxy-body-size:    "1m"
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    traefik.ingress.kubernetes.io/router.entrypoints: web
 spec:
-  ingressClassName: nginx
+  ingressClassName: traefik
   rules:
     - host: taxdocs.dev.uptimecrew.internal
       http:
