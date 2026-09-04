@@ -25,10 +25,10 @@ images:
     newName: uptimecrew/taxdocs-api
     newTag:  0.1.1
 
-# Per-env replica count -- dev runs hot at one replica.
-replicas:
-  - name:  taxdocs-api
-    count: 1
+# No replicas patch here: base/50-taxdocs-api.hpa.yaml (minReplicas: 2) owns
+# spec.replicas for taxdocs-api once the HPA is attached. A Kustomize replicas
+# patch here would fight the HPA every reconcile -- HPA scales back to its
+# floor immediately after each Argo CD sync, showing as perpetual OutOfSync.
 
 # Per-env config patch -- override the W5 D3 ConfigMap entries
 # that should differ between envs (Spring profile, log level,
