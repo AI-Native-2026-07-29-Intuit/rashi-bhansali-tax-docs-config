@@ -60,9 +60,14 @@ patches:
       kind: ConfigMap
       name: taxdocs-api-config
     patch: |-
-      - op: replace
-        path: /data/SPRING_PROFILES_ACTIVE
-        value: dev
+      # SPRING_PROFILES_ACTIVE deliberately NOT patched: the app's real application.yml
+      # defines exactly three profile documents -- default (local), test, and a combined
+      # prod,k8s (banner-mode only, confirmed via direct read of application.yml). There is
+      # no standalone `dev` or `k8s` profile; naming one that doesn't exist doesn't fail
+      # loudly, it silently falls back to the default/local block. Base ships `k8s` (also
+      # not a real standalone profile name) -- left as-is here since dev's own datastore
+      # hostnames/credentials are already correct via base and this key does not change
+      # runtime behavior either way for dev's known-working state.
       - op: replace
         path: /data/LOGGING_LEVEL_ROOT
         value: DEBUG
