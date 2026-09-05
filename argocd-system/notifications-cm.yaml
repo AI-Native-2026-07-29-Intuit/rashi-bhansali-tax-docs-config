@@ -48,10 +48,10 @@ data:
 
   # Routes every Application labelled team=taxdocs (all three envs, via
   # argocd/applications/taxdocs-api-dev.yaml and the ApplicationSet's
-  # template) to #taxdocs-deploys for both triggers above.
+  # template) to #taxdocs-deploys-rashi-bhansali for both triggers above.
   subscriptions: |
     - recipients:
-        - slack:taxdocs-deploys
+        - slack:taxdocs-deploys-rashi-bhansali
       triggers:
         - on-sync-failed
         - on-health-degraded

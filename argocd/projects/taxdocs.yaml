@@ -13,8 +13,8 @@ spec:
   description: taxdocs-api GitOps cutover -- pull-based deploys via Argo CD
 
   sourceRepos:
-    - https://github.com/rashi-bhansali/rashi-bhansali-tax-docs-config.git
-
+    - https://github.com/AI-Native-2026-07-29-Intuit/rashi-bhansali-tax-docs-config.git
+  targetRevision:  w6d2-implementation
   destinations:
     - namespace: taxdocs-dev
       server:    https://kubernetes.default.svc

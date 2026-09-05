@@ -17,7 +17,7 @@ spec:
   project: taxdocs
 
   source:
-    repoURL:        https://github.com/rashi-bhansali/rashi-bhansali-tax-docs-config.git
+    repoURL:        https://github.com/AI-Native-2026-07-29-Intuit/rashi-bhansali-tax-docs-config.git
     targetRevision:  w6d2-implementation
     path:            overlays/dev
 
