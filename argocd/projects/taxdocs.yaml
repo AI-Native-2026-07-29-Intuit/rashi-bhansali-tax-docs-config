@@ -23,26 +23,22 @@ spec:
     - namespace: taxdocs-prod
       server:    https://kubernetes.default.svc
 
-  # Full deny on cluster-scoped resources: the app team has no business
-  # creating ClusterRoles, CustomResourceDefinitions, or PersistentVolumes --
-  # those are platform-team owned. This also covers Namespace itself (also
-  # cluster-scoped): taxdocs-dev/-staging/-prod are created out-of-band by
-  # the platform team, not by this Application -- base/00-namespace.yaml is
-  # still committed here (it's part of the verbatim W5 D3 manifest set) but
-  # is intentionally left out of base/kustomization.yaml's resources so this
-  # Application's render never includes it and Argo CD never tries to sync
-  # a kind this whitelist denies.
-  clusterResourceWhitelist: []
+  # Namespace is the one cluster-scoped resource Argo CD is allowed to
+  # manage -- it's namespaced=false in the Kubernetes API (confirmed via
+  # `kubectl api-resources --namespaced=false`), so Argo CD's project-scope
+  # check evaluates it against THIS list, never namespaceResourceWhitelist
+  # below, regardless of whether Namespace also appears there. Everything
+  # else cluster-scoped (ClusterRoles, CustomResourceDefinitions,
+  # PersistentVolumes) stays denied by simply not being listed here --
+  # those remain platform-team owned.
+  clusterResourceWhitelist:
+    - group: ""
+      kind:  Namespace
 
   # Enumerated to exactly the kinds the W5 D3 manifests use, plus Endpoints
   # and Ingress for the dev datastore-bridge and external-ingress resources
-  # already deployed. Namespace is listed here too even though it is
-  # cluster-scoped (governed by clusterResourceWhitelist above, which denies
-  # it) -- harmless to list, but Argo CD will never actually permit syncing
-  # it through this field.
+  # already deployed.
   namespaceResourceWhitelist:
-    - group: ""
-      kind:  Namespace
     - group: ""
       kind:  Service
     - group: ""
