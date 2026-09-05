@@ -23,7 +23,7 @@ namespace: taxdocs-dev
 images:
   - name:    uptimecrew/taxdocs-api
     newName: uptimecrew/taxdocs-api
-    newTag:  0.1.1-does-not-exist
+    newTag:  0.1.1
 
 # No Kustomize `replicas:` block here: base/50-taxdocs-api.hpa.yaml owns
 # spec.replicas for taxdocs-api once the HPA is attached, so a separate
