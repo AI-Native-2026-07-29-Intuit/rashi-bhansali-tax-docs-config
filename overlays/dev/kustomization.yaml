@@ -32,30 +32,21 @@ images:
 # OutOfSync. Instead, dev's floor is lowered via the HPA patch below so the
 # HPA and Kustomize agree on a resting replica count of 1.
 
+# Sync-wave via commonAnnotations: stamps argocd.argoproj.io/sync-wave: "-1"
+# onto EVERY resource in this overlay, not just Namespace -- Deployment,
+# Service, ConfigMap, etc. all land in the same wave as Namespace. This
+# means nothing is actually staggered against the Namespace anymore (a
+# real behavior change from the previous per-resource JSON-patch design,
+# which put only Namespace+ConfigMap in wave -1 and left Deployment at
+# the default wave 0). Chosen deliberately per instruction; the prior
+# per-resource-patch approach remains the way to stagger waves for real.
+commonAnnotations:
+  argocd.argoproj.io/sync-wave: "-1"
+
 # Per-env config patch -- override the W5 D3 ConfigMap entries
 # that should differ between envs (Spring profile, log level,
 # feature flags).
-#
-# Sync-wave annotations: commonAnnotations can't express this -- it stamps
-# the SAME value onto every resource, so Namespace/ConfigMap/Deployment would
-# all land in one wave together instead of staggered. Each kind needs its own
-# JSON Patch op targeting only that resource. `~1` escapes the `/` in
-# argocd.argoproj.io/sync-wave (JSON Pointer syntax, RFC 6901). Namespace and
-# ConfigMap sync in wave -1 (before anything else); Deployment is unannotated
-# and defaults to wave 0, landing after -- so a first-time sync to a new
-# namespace converges in one pass instead of the Deployment racing a
-# not-yet-created Namespace/ConfigMap.
 patches:
-  - target:
-      kind: Namespace
-      name: taxdocs-dev
-    patch: |-
-      - op: add
-        path: /metadata/annotations
-        value: {}
-      - op: add
-        path: /metadata/annotations/argocd.argoproj.io~1sync-wave
-        value: "-1"
   - target:
       kind: ConfigMap
       name: taxdocs-api-config
@@ -71,12 +62,6 @@ patches:
       - op: replace
         path: /data/LOGGING_LEVEL_ROOT
         value: DEBUG
-      - op: add
-        path: /metadata/annotations
-        value: {}
-      - op: add
-        path: /metadata/annotations/argocd.argoproj.io~1sync-wave
-        value: "-1"
   - target:
       kind: HorizontalPodAutoscaler
       name: taxdocs-api

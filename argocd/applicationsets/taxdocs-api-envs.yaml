@@ -16,6 +16,15 @@ metadata:
   name:      taxdocs-api-envs
   namespace: argocd
 spec:
+  # If a list-generator element (an env) is ever removed, the ApplicationSet
+  # controller stops managing that generated Application -- but with this
+  # set, it does NOT delete the Application or cascade-delete its resources.
+  # Restoring the removed element re-adopts the still-live Application.
+  # Without this, removing an env from the list silently deletes that whole
+  # environment's live resources (prod safety).
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+
   generators:
     - matrix:
         generators:

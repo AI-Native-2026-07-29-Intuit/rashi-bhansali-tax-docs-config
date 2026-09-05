@@ -12,15 +12,14 @@ resources:
 
 namespace: taxdocs-prod
 
+# Sync-wave via commonAnnotations: stamps argocd.argoproj.io/sync-wave: "-1"
+# onto EVERY resource in this overlay, not just Namespace -- see dev's
+# overlay for the full tradeoff (nothing is actually staggered anymore,
+# chosen deliberately per instruction).
+commonAnnotations:
+  argocd.argoproj.io/sync-wave: "-1"
+
 patches:
-  - target:
-      kind: Namespace
-      name: taxdocs-dev
-    patch: |-
-      - op: add
-        path: /metadata/annotations
-        value:
-          argocd.argoproj.io/sync-wave: "-1"
   - target:
       kind: ConfigMap
       name: taxdocs-api-config
