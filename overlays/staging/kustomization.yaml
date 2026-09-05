@@ -69,14 +69,19 @@ patches:
         path: /spec/namespaceSelector/matchNames/0
         value: taxdocs-staging
 
-  # Env sizing on the HPA, not spec.replicas -- see the dev overlay for why pinning replicas
-  # against a base HPA makes Argo CD and the autoscaler trade writes forever.
+  # TEMPORARY for Task 4's selfHeal proof: spec.replicas is normally NOT
+  # Argo-CD-owned here (see the dev overlay for why a fixed count fights the
+  # HPA) -- reinstated for a few minutes to capture a real
+  # argocd-application-controller self-heal log line from a `kubectl scale`,
+  # with minReplicas == maxReplicas so the HPA can't disagree with it in the
+  # meantime. Revert this patch block back to `remove` once captured.
   - target:
       kind: Deployment
       name: taxdocs-api
     patch: |-
-      - op: remove
+      - op: replace
         path: /spec/replicas
+        value: 2
   - target:
       kind: HorizontalPodAutoscaler
       name: taxdocs-api
@@ -86,7 +91,7 @@ patches:
         value: 2
       - op: replace
         path: /spec/maxReplicas
-        value: 4
+        value: 2
 
 images:
   - name: uptimecrew/taxdocs-api
