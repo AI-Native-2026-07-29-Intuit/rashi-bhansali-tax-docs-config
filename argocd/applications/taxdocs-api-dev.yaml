@@ -7,6 +7,8 @@ kind:       Application
 metadata:
   name:      taxdocs-api-dev
   namespace: argocd
+  labels:
+    team: taxdocs
   finalizers:
     # Ensures `kubectl delete` on this Application cascades to delete the
     # resources it manages, instead of orphaning them in the cluster.

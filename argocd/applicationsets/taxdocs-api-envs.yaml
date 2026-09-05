@@ -50,6 +50,11 @@ spec:
   template:
     metadata:
       name: taxdocs-api-{{env}}
+      labels:
+        # Matches argocd-system/notifications-cm.yaml's subscriptions block
+        # (team=taxdocs -> #taxdocs-deploys), so every env's on-sync-failed
+        # and on-health-degraded events route to the same Slack channel.
+        team: taxdocs
       annotations:
         argocd.argoproj.io/sync-wave: "{{wave}}"
       finalizers:
