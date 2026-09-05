@@ -73,3 +73,22 @@ spec:
         syncOptions:
           - CreateNamespace=true
           - ServerSideApply=true
+
+      # DB_PASSWORD is a real credential applied out-of-band per env (kubectl
+      # apply --field-manager=local-secret-override against a gitignored
+      # *.secret.local.yaml) -- the committed manifest keeps a placeholder.
+      # jsonPointers alone only suppresses the diff/sync-status display;
+      # managedFieldsManagers is what actually stops argocd-controller from
+      # re-asserting a value for this field on every sync. Lost when
+      # taxdocs-api-dev was first adopted by this ApplicationSet (the
+      # original standalone Application had this, the template didn't) --
+      # confirmed live as a recurring password-auth-failure crashloop.
+      ignoreDifferences:
+        - group: ""
+          kind:  Secret
+          name:  taxdocs-api-secrets
+          jsonPointers:
+            - /data/DB_PASSWORD
+            - /stringData/DB_PASSWORD
+          managedFieldsManagers:
+            - local-secret-override

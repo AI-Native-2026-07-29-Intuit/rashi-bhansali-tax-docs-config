@@ -4,6 +4,10 @@ kind: Kustomization
 
 resources:
   - ../../base
+  # Local-cluster-only bridge Services/Endpoints for the Compose-managed
+  # postgres/redis/kafka/mongo containers -- own isolated Compose project
+  # (taxdocs_staging), never in base since dev/prod must not share it.
+  - 05-taxdocs-staging.external-datastores.yaml
 
 namespace: taxdocs-staging
 
