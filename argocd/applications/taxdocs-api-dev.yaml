@@ -32,12 +32,21 @@ spec:
       - ServerSideApply=true
 
   # DB_PASSWORD is a real local dev credential applied out-of-band (via a
-  # gitignored *.secret.local.yaml, see base/40-taxdocs-api.secret.yaml) --
-  # the committed manifest keeps a placeholder value. Without this,
-  # selfHeal reverts the live Secret to that placeholder on every sync.
+  # gitignored *.secret.local.yaml, see base/40-taxdocs-api.secret.yaml,
+  # applied with --field-manager=local-secret-override) -- the committed
+  # manifest keeps a placeholder value. jsonPointers alone only suppresses
+  # the *diff/sync-status* for this field -- it does NOT stop a sync
+  # operation from actually re-applying (and overwriting) it via
+  # ServerSideApply. managedFieldsManagers is what actually excludes the
+  # field from Argo CD's own apply: once local-secret-override owns
+  # stringData.DB_PASSWORD, argocd-controller stops asserting a value for
+  # it on every sync.
   ignoreDifferences:
     - group: ""
       kind:  Secret
       name:  taxdocs-api-secrets
       jsonPointers:
         - /data/DB_PASSWORD
+        - /stringData/DB_PASSWORD
+      managedFieldsManagers:
+        - local-secret-override
