@@ -1,38 +1,13 @@
+# base/00-namespace.yaml - the bounded blast radius for taxdocs-api, GitOps-managed half.
+#
+# ResourceQuota + LimitRange stay in the app repo's manifests/00-namespace.yaml as a
+# platform-applied-once concern, not copied here. The AppProject's namespaceResourceBlacklist
+# (argocd/projects/taxdocs.yaml) denies ResourceQuota and LimitRange for exactly this reason:
+# Argo CD only owns the Namespace object itself, quota/limit ceilings are the platform team's.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: taxdocs-dev
----
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: taxdocs-dev-quota
-  namespace: taxdocs-dev
-spec:
-  hard:
-    requests.cpu: "4"
-    requests.memory: 8Gi
-    # No limits.cpu: Kubernetes requires every pod in a namespace to set any
-    # resource type its quota tracks, so a limits.cpu entry here would force
-    # a CPU limit onto taxdocs-api -- exactly what Task 3 says to avoid (CFS
-    # throttling on burst). limits.memory still caps the OOM line.
-    limits.memory: 16Gi
-    pods: "20"
----
-apiVersion: v1
-kind: LimitRange
-metadata:
-  name: taxdocs-dev-limits
-  namespace: taxdocs-dev
-spec:
-  limits:
-    - type: Container
-      defaultRequest:
-        cpu: 100m
-        memory: 256Mi
-      default:
-        # No default cpu limit: Task 3 requires the taxdocs-api container to
-        # have no limits.cpu (avoids CFS throttling on burst; the HPA target
-        # is a % of requests.cpu, not limits.cpu). A default here would
-        # silently reintroduce a CPU limit on any container that omits one.
-        memory: 768Mi
+  labels:
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: argocd
