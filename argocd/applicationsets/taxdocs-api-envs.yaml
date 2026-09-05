@@ -1,0 +1,66 @@
+# ApplicationSet: taxdocs-api-envs
+#
+# Matrix generator: {env, overlay, namespace, wave} tuples x clusters matching
+# uptimecrew.example.internal/tier=workload. Templates one Application per
+# (env, cluster) pair -- today that's exactly 3 Applications, since only one
+# cluster (in-cluster, labeled by hand -- see argocd/applicationsets/README or
+# the platform team's cluster-registration process) carries that label.
+#
+# Application names are taxdocs-api-<env>, matching what argocd/projects/
+# taxdocs.yaml's roles (developers/releasers) and syncWindows (prod freeze)
+# already reference -- renaming the env list here would silently detach those
+# guardrails from the real Applications.
+apiVersion: argoproj.io/v1alpha1
+kind:       ApplicationSet
+metadata:
+  name:      taxdocs-api-envs
+  namespace: argocd
+spec:
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env:       dev
+                  overlay:   overlays/dev
+                  namespace: taxdocs-dev
+                  wave:      "0"
+                - env:       staging
+                  overlay:   overlays/staging
+                  namespace: taxdocs-staging
+                  wave:      "1"
+                - env:       prod
+                  overlay:   overlays/prod
+                  namespace: taxdocs-prod
+                  wave:      "2"
+          - clusters:
+              selector:
+                matchLabels:
+                  uptimecrew.example.internal/tier: workload
+
+  template:
+    metadata:
+      name: taxdocs-api-{{env}}
+      annotations:
+        argocd.argoproj.io/sync-wave: "{{wave}}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: taxdocs
+
+      source:
+        repoURL:        https://github.com/rashi-bhansali/rashi-bhansali-tax-docs-config.git
+        targetRevision: w6d2-implementation
+        path:           "{{overlay}}"
+
+      destination:
+        server:    "{{server}}"
+        namespace: "{{namespace}}"
+
+      syncPolicy:
+        automated:
+          prune:    true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
