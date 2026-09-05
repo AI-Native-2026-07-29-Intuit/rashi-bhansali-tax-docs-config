@@ -1,0 +1,117 @@
+# AppProject: taxdocs
+#
+# Task 2 tightens this project's scope: destinations are pinned to exactly
+# taxdocs-dev/-staging/-prod on the in-cluster API server -- no `*` anywhere,
+# since a wildcard destination is indistinguishable from the default project
+# for security purposes.
+apiVersion: argoproj.io/v1alpha1
+kind:       AppProject
+metadata:
+  name:      taxdocs
+  namespace: argocd
+spec:
+  description: taxdocs-api GitOps cutover -- pull-based deploys via Argo CD
+
+  sourceRepos:
+    - https://github.com/AI-Native-2026-07-29-Intuit/rashi-bhansali-tax-docs-config.git
+
+  destinations:
+    - namespace: taxdocs-dev
+      server:    https://kubernetes.default.svc
+    - namespace: taxdocs-staging
+      server:    https://kubernetes.default.svc
+    - namespace: taxdocs-prod
+      server:    https://kubernetes.default.svc
+
+  # Namespace is the one cluster-scoped resource Argo CD is allowed to
+  # manage -- it's namespaced=false in the Kubernetes API (confirmed via
+  # `kubectl api-resources --namespaced=false`), so Argo CD's project-scope
+  # check evaluates it against THIS list, never namespaceResourceWhitelist
+  # below, regardless of whether Namespace also appears there. Everything
+  # else cluster-scoped (ClusterRoles, CustomResourceDefinitions,
+  # PersistentVolumes) stays denied by simply not being listed here --
+  # those remain platform-team owned.
+  clusterResourceWhitelist:
+    - group: ""
+      kind:  Namespace
+
+  # Enumerated to exactly the kinds the W5 D3 manifests use, plus Endpoints
+  # and Ingress for the dev datastore-bridge and external-ingress resources
+  # already deployed.
+  namespaceResourceWhitelist:
+    - group: ""
+      kind:  Service
+    - group: ""
+      kind:  ConfigMap
+    - group: ""
+      kind:  Secret
+    - group: ""
+      kind:  ServiceAccount
+    - group: ""
+      kind:  Endpoints
+    - group: apps
+      kind:  Deployment
+    - group: autoscaling
+      kind:  HorizontalPodAutoscaler
+    - group: policy
+      kind:  PodDisruptionBudget
+    - group: networking.k8s.io
+      kind:  NetworkPolicy
+    - group: networking.k8s.io
+      kind:  Ingress
+    - group: monitoring.coreos.com
+      kind:  ServiceMonitor
+    - group: monitoring.coreos.com
+      kind:  PrometheusRule
+
+  # ResourceQuota and LimitRange are platform-owned (set once per namespace,
+  # not something the app team should be able to change via GitOps) --
+  # explicitly blacklisted even though they're also simply absent from the
+  # whitelist above, so intent is unambiguous on read.
+  namespaceResourceBlacklist:
+    - group: ""
+      kind:  ResourceQuota
+    - group: ""
+      kind:  LimitRange
+
+  # Casbin evaluates explicit deny before allow, so the deny rows below hold
+  # regardless of rule order. Group bindings are inert until this cluster's
+  # Argo CD has OIDC wired up (out of scope here) -- they document the
+  # intended RBAC for the platform team to bind once that lands.
+  roles:
+    # Can inspect and trigger syncs on dev/staging, never prod, never delete.
+    - name: developers
+      description: App team -- sync access to dev and staging only
+      groups:
+        - uptimecrew:taxdocs-engineers
+      policies:
+        - p, proj:taxdocs:developers, applications, get,    taxdocs/taxdocs-api-dev,     allow
+        - p, proj:taxdocs:developers, applications, sync,   taxdocs/taxdocs-api-dev,     allow
+        - p, proj:taxdocs:developers, applications, get,    taxdocs/taxdocs-api-staging, allow
+        - p, proj:taxdocs:developers, applications, sync,   taxdocs/taxdocs-api-staging, allow
+        - p, proj:taxdocs:developers, applications, delete, taxdocs/*,                  deny
+
+    # Can sync any Application in the project, including prod; never delete.
+    - name: releasers
+      description: Release engineers -- sync access to every env, including prod
+      groups:
+        - uptimecrew:taxdocs-engineers-releasers
+      policies:
+        - p, proj:taxdocs:releasers, applications, get,    taxdocs/*, allow
+        - p, proj:taxdocs:releasers, applications, sync,   taxdocs/*, allow
+        - p, proj:taxdocs:releasers, applications, delete, taxdocs/*, deny
+
+  # Weekend change freeze on prod: Friday 17:00 UTC through Monday 05:00 UTC
+  # (schedule fires Friday 17:00, duration 60h -> Fri 17:00 + 24h + 24h + 12h
+  # = Mon 05:00). A curriculum convention, not a real policy -- actual freeze
+  # windows are decided per team. `deny` blocks automated AND manual sync for
+  # the duration; manualSync: true carves out an explicit manual-override
+  # path (still gated by RBAC/roles above) for a genuine incident during the
+  # freeze.
+  syncWindows:
+    - kind:        deny
+      schedule:    "0 17 * * 5"
+      duration:    60h
+      applications:
+        - taxdocs-api-prod
+      manualSync:  true

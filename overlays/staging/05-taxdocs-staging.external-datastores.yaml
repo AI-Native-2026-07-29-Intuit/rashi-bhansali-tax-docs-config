@@ -1,0 +1,120 @@
+# Local-cluster-only bridge: a separate Compose project (taxdocs_staging,
+# same postgres/redis/kafka/mongo images as dev) gives staging its own
+# isolated datastores. Service + Endpoints pairs (no selector -- manually
+# managed) give the pods in taxdocs-staging the same in-cluster DNS names
+# (postgres.taxdocs-staging.svc.cluster.local, etc.) they'll have once real
+# in-cluster or managed datastores replace this workaround. IPs come from
+# `docker network inspect taxdocs_staging_taxdocs_net` after the k3d nodes
+# were `docker network connect`-ed to it; they only stay valid as long as
+# those Compose containers aren't recreated.
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: taxdocs-staging
+  labels:
+    app.kubernetes.io/name: postgres
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: postgres
+  namespace: taxdocs-staging
+subsets:
+  - addresses:
+      - ip: 172.20.0.2
+    ports:
+      - name: postgres
+        port: 5432
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongo
+  namespace: taxdocs-staging
+  labels:
+    app.kubernetes.io/name: mongo
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  ports:
+    - name: mongo
+      port: 27017
+      targetPort: 27017
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: mongo
+  namespace: taxdocs-staging
+subsets:
+  - addresses:
+      - ip: 172.20.0.4
+    ports:
+      - name: mongo
+        port: 27017
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: taxdocs-staging
+  labels:
+    app.kubernetes.io/name: redis
+    app.kubernetes.io/component: cache
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  ports:
+    - name: redis
+      port: 6379
+      targetPort: 6379
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: redis
+  namespace: taxdocs-staging
+subsets:
+  - addresses:
+      - ip: 172.20.0.5
+    ports:
+      - name: redis
+        port: 6379
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kafka
+  namespace: taxdocs-staging
+  labels:
+    app.kubernetes.io/name: kafka
+    app.kubernetes.io/component: broker
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  ports:
+    - name: kafka
+      port: 9092
+      targetPort: 9092
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: kafka
+  namespace: taxdocs-staging
+subsets:
+  - addresses:
+      - ip: 172.20.0.3
+    ports:
+      - name: kafka
+        port: 9092

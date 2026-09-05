@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taxdocs-api
+  namespace: taxdocs-dev
+  labels:
+    app.kubernetes.io/name: taxdocs-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taxdocs-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taxdocs-api
+        app.kubernetes.io/component: api
+        app.kubernetes.io/part-of: taxdocs
+        app.kubernetes.io/managed-by: kubectl
+      annotations:
+        # A change to either file's content changes this checksum, which
+        # changes the pod template, which triggers a rollout -- ConfigMap/
+        # Secret updates alone don't restart already-running pods otherwise.
+        # CI recomputes these from the applied files; for local iteration,
+        # `kubectl rollout restart deploy/taxdocs-api` is the kill switch.
+        checksum/config: "de5f7d35c24428b5170498531c757e867fac04829c802f8e0be79b40d122ab81"
+        checksum/secret: "c1c44d8272877825923fbd4dbe0d2f0532561bc172cfa9414058c9c54afff21d"
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: taxdocs-api
+          image: uptimecrew/taxdocs-api:0.1.1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: taxdocs-api-config
+            - secretRef:
+                name: taxdocs-api-secrets
+          # Memory-safety flags (-XX:MaxRAMPercentage, -XX:+ExitOnOutOfMemoryError) are baked
+          # into the image's ENTRYPOINT (Dockerfile) as literal java args, not passed here via
+          # JAVA_TOOL_OPTIONS -- that env var makes the JVM print a "Picked up
+          # JAVA_TOOL_OPTIONS: ..." notice on every process start, which lands on line 1 of
+          # `kubectl logs` before Logback initializes, breaking the guarantee that every log
+          # line is JSON (W5D5 Task 2).
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 30
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: http
+            periodSeconds: 10
+            failureThreshold: 3
+            initialDelaySeconds: 0
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: http
+            periodSeconds: 5
+            failureThreshold: 3
+            successThreshold: 1

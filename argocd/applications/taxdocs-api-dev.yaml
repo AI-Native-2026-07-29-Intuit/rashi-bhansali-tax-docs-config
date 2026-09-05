@@ -1,0 +1,54 @@
+# Application: taxdocs-api-dev
+#
+# Dev anchor for the GitOps cutover -- replaces CI's kubectl apply with
+# Argo CD pulling overlays/dev from this repo.
+apiVersion: argoproj.io/v1alpha1
+kind:       Application
+metadata:
+  name:      taxdocs-api-dev
+  namespace: argocd
+  labels:
+    team: taxdocs
+  finalizers:
+    # Ensures `kubectl delete` on this Application cascades to delete the
+    # resources it manages, instead of orphaning them in the cluster.
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: taxdocs
+
+  source:
+    repoURL:        https://github.com/AI-Native-2026-07-29-Intuit/rashi-bhansali-tax-docs-config.git
+    targetRevision:  w6d2-implementation
+    path:            overlays/dev
+
+  destination:
+    server:    https://kubernetes.default.svc
+    namespace: taxdocs-dev
+
+  syncPolicy:
+    automated:
+      prune:    true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+  # DB_PASSWORD is a real local dev credential applied out-of-band (via a
+  # gitignored *.secret.local.yaml, see base/40-taxdocs-api.secret.yaml,
+  # applied with --field-manager=local-secret-override) -- the committed
+  # manifest keeps a placeholder value. jsonPointers alone only suppresses
+  # the *diff/sync-status* for this field -- it does NOT stop a sync
+  # operation from actually re-applying (and overwriting) it via
+  # ServerSideApply. managedFieldsManagers is what actually excludes the
+  # field from Argo CD's own apply: once local-secret-override owns
+  # stringData.DB_PASSWORD, argocd-controller stops asserting a value for
+  # it on every sync.
+  ignoreDifferences:
+    - group: ""
+      kind:  Secret
+      name:  taxdocs-api-secrets
+      jsonPointers:
+        - /data/DB_PASSWORD
+        - /stringData/DB_PASSWORD
+      managedFieldsManagers:
+        - local-secret-override

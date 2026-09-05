@@ -1,0 +1,24 @@
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: taxdocs-api
+  namespace: taxdocs-dev
+  labels:
+    app.kubernetes.io/name: taxdocs-api
+    app.kubernetes.io/part-of: taxdocs
+    # CRITICAL: kube-prometheus-stack's Prometheus CR runs with
+    # serviceMonitorSelectorNilUsesHelmValues: true, which scopes discovery to
+    # ServiceMonitors carrying this exact label. Without it, the scrape config is
+    # never generated -- no error anywhere, just an absent target and no data.
+    release: kube-prometheus-stack
+spec:
+  namespaceSelector:
+    matchNames:
+      - taxdocs-dev
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taxdocs-api
+  endpoints:
+    - port: http
+      path: /actuator/prometheus
+      interval: 15s

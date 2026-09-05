@@ -1,0 +1,105 @@
+# overlays/prod/kustomization.yaml - same shape as dev, prod-sized.
+#
+# prod still runs the same automated syncPolicy as dev/staging (see the ApplicationSet).
+# On a k3d cluster with no real users that is the honest choice; the syncWindows deny block
+# in argocd/projects/taxdocs.yaml is what keeps the controller from promoting here over a
+# weekend. GITOPS.md records the trade-off against requiring manual sync for prod.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  # Local-cluster-only bridge Services/Endpoints for the Compose-managed
+  # postgres/redis/kafka/mongo containers -- own isolated Compose project
+  # (taxdocs_prod), never in base since dev/staging must not share it.
+  - 05-taxdocs-prod.external-datastores.yaml
+
+namespace: taxdocs-prod
+
+# Sync-wave via commonAnnotations: stamps argocd.argoproj.io/sync-wave: "-1"
+# onto EVERY resource in this overlay, not just Namespace -- see dev's
+# overlay for the full tradeoff (nothing is actually staggered anymore,
+# chosen deliberately per instruction).
+commonAnnotations:
+  argocd.argoproj.io/sync-wave: "-1"
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: taxdocs-api-config
+    patch: |-
+      # SPRING_PROFILES_ACTIVE: prod,k8s is the one real profile combination the app defines
+      # (confirmed by direct read of application.yml -- only `default`/local, `test`, and a
+      # combined `on-profile: prod,k8s` document exist; there is no standalone `k8s`, `dev`,
+      # `staging`, or bare `prod`). Both names are required together to activate that block,
+      # which only suppresses the startup banner (main.banner-mode: off) -- ddl-auto: validate
+      # applies unconditionally to every profile, in its own profile-free document, so this
+      # patch changes nothing about database connection behavior. Per-env divergence for
+      # datasource/redis/kafka/log-level lives entirely in the config values below.
+      - op: replace
+        path: /data/SPRING_PROFILES_ACTIVE
+        value: prod,k8s
+      - op: replace
+        path: /data/LOGGING_LEVEL_ROOT
+        value: WARN
+      - op: replace
+        path: /data/SPRING_DATASOURCE_URL
+        value: jdbc:postgresql://postgres.taxdocs-prod.svc.cluster.local:5432/taxdocs_prod
+      - op: replace
+        path: /data/SPRING_DATASOURCE_USERNAME
+        value: taxdocs_prod
+      - op: replace
+        path: /data/SPRING_DATA_REDIS_HOST
+        value: redis.taxdocs-prod.svc.cluster.local
+      - op: replace
+        path: /data/SPRING_KAFKA_BOOTSTRAP_SERVERS
+        value: kafka.taxdocs-prod.svc.cluster.local:9092
+      # Trace sampling: 10% is fine in dev/staging, but prod carries real request volume and
+      # the OTel collector is a shared dependency. Tightened to 1%.
+      - op: replace
+        path: /data/OTEL_TRACES_SAMPLER_ARG
+        value: "0.01"
+  # See the staging overlay: an Ingress host+path pair is cluster-scoped to the nginx
+  # controller, so each env needs its own hostname or nginx's admission webhook rejects the sync.
+  - target:
+      kind: Ingress
+      name: taxdocs-api
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: taxdocs.prod.uptimecrew.internal
+  # spec.namespaceSelector.matchNames is a plain string inside the ServiceMonitor CR's spec,
+  # not metadata.namespace -- the `namespace:` transformer above never touches it. Without this
+  # patch, prod's ServiceMonitor keeps watching taxdocs-dev and Prometheus never discovers
+  # prod's pods at all.
+  - target:
+      kind: ServiceMonitor
+      name: taxdocs-api
+    patch: |-
+      - op: replace
+        path: /spec/namespaceSelector/matchNames/0
+        value: taxdocs-prod
+
+  # Env sizing on the HPA, not spec.replicas -- see the dev overlay. Prod is where this bit
+  # hardest: it pinned 3, the HPA scaled to its minimum of 2, and the weekend freeze meant
+  # selfHeal could not reconcile the difference, so the Application sat OutOfSync indefinitely.
+  - target:
+      kind: Deployment
+      name: taxdocs-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: taxdocs-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 3
+      - op: replace
+        path: /spec/maxReplicas
+        value: 6
+
+images:
+  - name: uptimecrew/taxdocs-api
+    newTag: 0.1.1

@@ -1,0 +1,112 @@
+# ApplicationSet: taxdocs-api-envs
+#
+# Matrix generator: {env, overlay, namespace, wave} tuples x clusters matching
+# uptimecrew.example.internal/tier=workload. Templates one Application per
+# (env, cluster) pair -- today that's exactly 3 Applications, since only one
+# cluster (in-cluster, labeled by hand -- see argocd/applicationsets/README or
+# the platform team's cluster-registration process) carries that label.
+#
+# Application names are taxdocs-api-<env>, matching what argocd/projects/
+# taxdocs.yaml's roles (developers/releasers) and syncWindows (prod freeze)
+# already reference -- renaming the env list here would silently detach those
+# guardrails from the real Applications.
+apiVersion: argoproj.io/v1alpha1
+kind:       ApplicationSet
+metadata:
+  name:      taxdocs-api-envs
+  namespace: argocd
+spec:
+  # If a list-generator element (an env) is ever removed, the ApplicationSet
+  # controller stops managing that generated Application -- but with this
+  # set, it does NOT delete the Application or cascade-delete its resources.
+  # Restoring the removed element re-adopts the still-live Application.
+  # Without this, removing an env from the list silently deletes that whole
+  # environment's live resources (prod safety).
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+
+  generators:
+    - matrix:
+        generators:
+          - list:
+              elements:
+                - env:       dev
+                  overlay:   overlays/dev
+                  namespace: taxdocs-dev
+                  wave:      "0"
+                - env:       staging
+                  overlay:   overlays/staging
+                  namespace: taxdocs-staging
+                  wave:      "1"
+                - env:       prod
+                  overlay:   overlays/prod
+                  namespace: taxdocs-prod
+                  wave:      "2"
+          - clusters:
+              selector:
+                matchLabels:
+                  uptimecrew.example.internal/tier: workload
+
+  template:
+    metadata:
+      name: taxdocs-api-{{env}}
+      labels:
+        # Matches argocd-system/notifications-cm.yaml's subscriptions block
+        # (team=taxdocs -> #taxdocs-deploys), so every env's on-sync-failed
+        # and on-health-degraded events route to the same Slack channel.
+        team: taxdocs
+      annotations:
+        argocd.argoproj.io/sync-wave: "{{wave}}"
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: taxdocs
+
+      source:
+        repoURL:        https://github.com/AI-Native-2026-07-29-Intuit/rashi-bhansali-tax-docs-config.git
+        targetRevision: w6d2-implementation
+        path:           "{{overlay}}"
+
+      destination:
+        server:    "{{server}}"
+        namespace: "{{namespace}}"
+
+      syncPolicy:
+        automated:
+          prune:    true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+
+      # DB_PASSWORD is a real credential applied out-of-band per env (kubectl
+      # apply --field-manager=local-secret-override against a gitignored
+      # *.secret.local.yaml) -- the committed manifest keeps a placeholder.
+      # jsonPointers alone only suppresses the diff/sync-status display;
+      # managedFieldsManagers is what actually stops argocd-controller from
+      # re-asserting a value for this field on every sync. Lost when
+      # taxdocs-api-dev was first adopted by this ApplicationSet (the
+      # original standalone Application had this, the template didn't) --
+      # confirmed live as a recurring password-auth-failure crashloop.
+      ignoreDifferences:
+        - group: ""
+          kind:  Secret
+          name:  taxdocs-api-secrets
+          jsonPointers:
+            - /data/DB_PASSWORD
+            - /stringData/DB_PASSWORD
+          managedFieldsManagers:
+            - local-secret-override
+        # spec.replicas on dev's Deployment is HPA-owned (base's HPA has no
+        # replicas patch in overlays/dev, unlike staging/prod which drop the
+        # HPA entirely and pin a fixed count instead). The HPA scales it
+        # above whatever the manifest last set any time load justifies it,
+        # which Argo CD otherwise reports as permanent OutOfSync drift even
+        # though nothing is actually wrong -- confirmed live (dev oscillating
+        # Synced/OutOfSync purely from HPA-driven scale events). Harmless for
+        # staging/prod: they have no HPA, so this field never drifts there.
+        - group: apps
+          kind:  Deployment
+          name:  taxdocs-api
+          jsonPointers:
+            - /spec/replicas
