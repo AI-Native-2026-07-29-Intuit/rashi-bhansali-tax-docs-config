@@ -92,3 +92,16 @@ spec:
             - /stringData/DB_PASSWORD
           managedFieldsManagers:
             - local-secret-override
+        # spec.replicas on dev's Deployment is HPA-owned (base's HPA has no
+        # replicas patch in overlays/dev, unlike staging/prod which drop the
+        # HPA entirely and pin a fixed count instead). The HPA scales it
+        # above whatever the manifest last set any time load justifies it,
+        # which Argo CD otherwise reports as permanent OutOfSync drift even
+        # though nothing is actually wrong -- confirmed live (dev oscillating
+        # Synced/OutOfSync purely from HPA-driven scale events). Harmless for
+        # staging/prod: they have no HPA, so this field never drifts there.
+        - group: apps
+          kind:  Deployment
+          name:  taxdocs-api
+          jsonPointers:
+            - /spec/replicas
