@@ -169,7 +169,9 @@ Resources:
               StringEquals:
                 "token.actions.githubusercontent.com:aud": sts.amazonaws.com
               StringLike:
-                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOrg}/${GitHubRepo}:*"
+                "token.actions.githubusercontent.com:sub":
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main"
+                  - !Sub "repo:${GitHubOrg}/${GitHubRepo}:pull_request"
       Policies:
         - PolicyName: taxdocs-cloudformation-deploy
           PolicyDocument:
@@ -190,7 +192,7 @@ Resources:
                   - cloudformation:ExecuteChangeSet
                   - cloudformation:GetTemplate
                   - cloudformation:ValidateTemplate
-                Resource: "arn:aws:cloudformation:*:*:stack/taxdocs-*"
+                Resource: !Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/taxdocs-*"
               - Sid: BootstrapTemplateRead
                 Effect: Allow
                 Action:

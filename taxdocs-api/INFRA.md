@@ -1,203 +1,238 @@
-# Taxdocs infrastructure
+# taxdocs-api/INFRA.md
 
-The AWS substrate is authored as raw CloudFormation YAML in `cfn/`. Floci is
-the local execution target; it is not treated as equivalent to the AWS control
-plane.
+The AWS substrate for the taxdocs capstone is authored as raw CloudFormation
+YAML in `cfn/`. Floci is the local execution/testing target only; it is not
+treated as equivalent to the AWS CloudFormation control plane, and CDK (if
+encountered) is read-only reference material, not a replacement authoring
+path.
+
+Previous work (W6 D1, W6 D2) shipped CI via GitHub Actions + OIDC and moved
+deployment to Argo CD against a shared/platform-provided EKS cluster. This
+work provisions the AWS infrastructure substrate those workloads depend on:
+bootstrap IAM/storage, network, and application (RDS) resources, plus the
+validation tooling that gates changes to all of it.
 
 ## Stacks and deployment order
 
-1. `taxdocs-bootstrap-dev`
-   - Retained bootstrap and access-log S3 buckets.
-   - GitHub OIDC CloudFormation deployment role.
-2. `taxdocs-artifacts-dev`
-   - Independent retained artifact bucket with KMS encryption, versioning,
-     public-access blocking, lifecycle transitions, and a non-TLS deny policy.
-3. `taxdocs-network-dev`
-   - Three-AZ VPC, three public and three private subnets, internet gateway,
-     environment-conditioned NAT gateways, routes, and the application
-     security group.
-4. `taxdocs-app-dev`
-   - RDS PostgreSQL, its subnet and security groups, and the cross-stack
-     application-to-database TCP 5432 rule.
+1. `taxdocs-bootstrap-dev` (Task 1)
+   - Retained bootstrap bucket + access-log bucket (KMS/AES256, PAB on all
+     four toggles, versioning, lifecycle, deny-non-TLS bucket policy).
+   - `CfnDeployRole` (`taxdocs-api-cfn-deploy`): the GitHub OIDC role every
+     later stack's ChangeSet is created and executed under.
+2. `taxdocs-artifacts-dev` (Task 3)
+   - Independent hardened artifact bucket (KMS, PAB, versioning, lifecycle
+     tiering to `STANDARD_IA`/`GLACIER_IR`, deny-non-TLS). No dependency on
+     the network or bootstrap stacks; can deploy any time after bootstrap.
+3. `taxdocs-network-dev` (Task 2)
+   - 3-AZ VPC, 3 public + 3 private subnets, Internet Gateway, public route
+     table, per-AZ private route tables, NAT gateways gated by an
+     `IsProdLike`/`IsDev` Condition pair (1 NAT in dev, 3 in staging/prod),
+     and the application security group.
+4. `taxdocs-app-dev` (Task 3)
+   - RDS PostgreSQL instance, DB subnet group, DB security group, and the
+     app-to-DB TCP 5432 rule. Consumes the network stack's exports via
+     `Fn::ImportValue`. Requires the `taxdocs/dev/db-master` Secrets Manager
+     secret to already exist (see below) — it is not created by this stack.
 
-Create `taxdocs/dev/db-master` in Secrets Manager before deploying the
-application stack. The artifact and network stacks are independent, but the
-network stack must exist before the application stack.
+Deploy order is bootstrap → (artifacts, network, in either order) → app. The
+app stack depends on the network stack's exports and on the out-of-band
+Secrets Manager secret; it has no dependency on the artifacts stack.
 
-## ChangeSet workflow
+## ChangeSet CREATE/UPDATE flow
 
-For local execution, every AWS CLI command is explicitly directed to Floci:
-
-```bash
-export FLOCI_ENDPOINT=http://localhost:4566
-export AWS_ACCESS_KEY_ID=test
-export AWS_SECRET_ACCESS_KEY=test
-export AWS_DEFAULT_REGION=us-east-1
-```
-
-Create a new stack:
+There is no `CREATE_OR_UPDATE` ChangeSet type — `--change-set-type` is either
+`CREATE` (new stack) or `UPDATE` (existing stack), decided before the call:
 
 ```bash
-aws --endpoint-url "$FLOCI_ENDPOINT" cloudformation create-change-set \
+# first deploy of a stack
+aws cloudformation create-change-set \
   --stack-name taxdocs-network-dev \
-  --change-set-name initial-network \
+  --change-set-name initial \
   --change-set-type CREATE \
   --template-body file://cfn/taxdocs-network-dev.yaml \
   --parameters ParameterKey=EnvName,ParameterValue=dev \
   --region us-east-1
 
-aws --endpoint-url "$FLOCI_ENDPOINT" cloudformation describe-change-set \
-  --stack-name taxdocs-network-dev \
-  --change-set-name initial-network \
+aws cloudformation describe-change-set \
+  --stack-name taxdocs-network-dev --change-set-name initial \
   --region us-east-1
+# review every Add / Modify / Remove / Replacement before proceeding
 
-aws --endpoint-url "$FLOCI_ENDPOINT" cloudformation execute-change-set \
-  --stack-name taxdocs-network-dev \
-  --change-set-name initial-network \
+aws cloudformation execute-change-set \
+  --stack-name taxdocs-network-dev --change-set-name initial \
   --region us-east-1
 ```
 
-Use `--change-set-type UPDATE` for an existing stack. Review every Add, Modify,
-Remove, and Replacement value from `describe-change-set` before execution.
-The bootstrap stack additionally requires `CAPABILITY_NAMED_IAM`.
+Subsequent changes use `--change-set-type UPDATE` against the same
+stack/template. The bootstrap stack additionally requires
+`--capabilities CAPABILITY_NAMED_IAM` because it names `CfnDeployRole`
+explicitly. `describe-change-set` output is the PR review artifact — every
+Replace, Modify, Add, and Remove is read before `execute-change-set` runs.
 
-Task 4 added a `ManagedBy=CloudFormation` VPC tag. Floci's ChangeSet reported
-one VPC Modify, no Add or Remove, and `Replacement: False`. Execution reached
-`UPDATE_COMPLETE`, but Floci changed the VPC ID and did not expose the new tag.
-The reviewed change had no intended replacement, but the emulator result
-cannot prove AWS replacement behavior.
+## Export/import naming
 
-## Exports and imports
-
-The network stack exports:
+The network stack exports (as literal, stack-specific names):
 
 - `taxdocs-network-dev-VpcId`
 - `taxdocs-network-dev-PublicSubnets`
 - `taxdocs-network-dev-PrivateSubnets`
 - `taxdocs-network-dev-AppSgId`
 
-The application stack imports the VPC, private subnet list, and application
-security group. No generated subnet or security-group ID is hardcoded. The
-private subnet export is split and selected into the RDS subnet group.
+The application stack imports `VpcId`, `PrivateSubnets` (split with
+`Fn::Split`/`Fn::Select` into three individual subnet IDs), and `AppSgId` via
+`Fn::ImportValue`. No subnet or security-group ID is hardcoded in the app
+template. The bootstrap and artifacts stacks export their own bucket/role
+values under their own stack name (e.g. `taxdocs-bootstrap-dev-BootstrapBucketArn`,
+`taxdocs-artifacts-dev-BucketArn`) — nothing outside the network stack is
+consumed cross-stack today.
 
-The bootstrap, artifact, and application stacks also export their bucket,
-role, database endpoint, port, and database security-group values under
-stack-prefixed names.
+Deviation from the reference shape: exports use literal strings
+(`taxdocs-network-dev-VpcId`) rather than `!Sub "${AWS::StackName}-VpcId"`.
+This is a portability note, not a security finding — it means renaming the
+stack breaks every consumer's `Fn::ImportValue`, since the export name no
+longer follows the stack automatically. Left as-is because the stack names
+are fixed per environment in this capstone; flagged here so a future
+multi-instance deployment doesn't get surprised by it.
 
-## Secrets and retained data
+## Secrets Manager password handling
 
-The database password is never a CloudFormation parameter and no password
-parameter uses `NoEcho`. RDS resolves only the `password` JSON key at deploy
-time:
+No template in `cfn/` declares a password `Parameter`, and none uses
+`NoEcho`. `cfn/taxdocs-app-dev.yaml` resolves the RDS master password with a
+Secrets Manager dynamic reference, evaluated at deploy time, never stored in
+template parameters or CloudFormation state:
 
 ```yaml
 MasterUserPassword: "{{resolve:secretsmanager:taxdocs/dev/db-master:SecretString:password}}"
 ```
 
-The out-of-band secret is not recreated or owned by the application stack.
-The bootstrap buckets, artifact bucket, and RDS instance each carry both:
+Unlike the cfn-author reference shape, the app stack does **not** create the
+`AWS::SecretsManager::Secret` or `AWS::SecretsManager::SecretTargetAttachment`
+resources itself — `taxdocs/dev/db-master` is treated as an out-of-band
+prerequisite that must exist before the app stack's ChangeSet is executed.
+This is a deliberate, not accidental, deviation: it keeps the secret's
+lifecycle independent of the app stack (a stack delete/replace never risks
+recreating or rotating it), at the cost of an operational precondition —
+deploying `taxdocs-app-dev` before the secret exists fails at
+`CREATE_IN_PROGRESS` on `DbInstance`. This precondition is recorded here so
+it isn't rediscovered as a deploy-time surprise.
+
+## Retention rules
+
+Every stateful resource in `cfn/` carries both policies, not just one:
 
 ```yaml
 DeletionPolicy: Retain
 UpdateReplacePolicy: Retain
 ```
 
-The artifact bucket transitions objects to `STANDARD_IA` after 90 days and
-`GLACIER_IR` after 365 days. Its four public-access-block settings are enabled,
-default encryption uses `alias/aws/s3`, versioning is enabled, and its bucket
-policy explicitly denies non-TLS S3 requests.
+Applies to: `AccessLogBucket`, `BootstrapBucket` (`taxdocs-bootstrap-dev.yaml`),
+`ArtifactBucket` (`taxdocs-artifacts-dev.yaml`), and `DbInstance`
+(`taxdocs-app-dev.yaml`). `UpdateReplacePolicy: Retain` matters as much as
+`DeletionPolicy: Retain` here: a property change that forces replacement
+(e.g. changing `DBSubnetGroupName` or a bucket's `BucketName`) without the
+former would silently delete the live resource on a successful `UPDATE`,
+even though the stack itself was never deleted.
 
 ## Validation workflow
 
-`.github/workflows/cfn-validate.yml` runs on pull requests that change `cfn/`
-or the workflow itself. It pins and runs:
+`.github/workflows/cfn-validate.yml` runs on any PR touching `cfn/` or the
+workflow file itself, against a Floci `2.0.1` service container:
 
-- `cfn-lint 1.56.0` against all four templates.
-- `cfn-nag 0.8.10` with `--fail-on-warnings`.
-- `aws cloudformation validate-template` against a local Floci service.
-
-The Floci validation step is a wire-compatibility check only. `cfn-lint` and
-`cfn-nag` are the meaningful local validation gates; Floci output is not
-represented as authoritative AWS `ValidateTemplate` behavior.
-
-Documented cfn-nag suppressions cover deliberate constraints: required fixed
-resource names, required internet TCP 443 egress, an explicit empty database
-SG egress list, and logging destinations not defined by these tasks. The final
-local scan completes with zero unsuppressed failures or warnings.
+1. `cfn-lint 1.56.0` against `cfn/*.yaml` — passes clean (0 errors) as of
+   this audit.
+2. `cfn-nag 0.8.10` via `cfn_nag_scan --fail-on-warnings` — passes clean
+   (0 failures, 0 warnings) across all four templates as of this audit.
+3. A Floci-backed `aws cloudformation validate-template` loop over all four
+   templates, explicitly labeled as a wire-compatibility check only —
+   `cfn-lint`/`cfn-nag` are the authoritative local gates, Floci's
+   `validate-template` response is not treated as proof of real AWS
+   acceptance.
 
 ## Drift verification
 
-The local drift probe was:
+Local drift probe attempted against Floci:
 
 ```bash
-aws --endpoint-url "$FLOCI_ENDPOINT" cloudformation detect-stack-drift \
-  --stack-name taxdocs-network-dev \
-  --region us-east-1
+aws --endpoint-url http://localhost:4566 cloudformation detect-stack-drift \
+  --stack-name taxdocs-network-dev --region us-east-1
 ```
 
-Floci returned `UnknownAction` because `DetectStackDrift` is unsupported.
-There is no local AWS Console in which to make the curriculum's deliberate
-mutation. No `DRIFTED` or `IN_SYNC` result was observed or claimed.
+Floci does not implement `DetectStackDrift` (`UnknownAction`). No `DRIFTED`
+or `IN_SYNC` result was produced or is claimed here. The full drift
+exercise — deliberate console mutation, `detect-stack-drift`,
+`describe-stack-drift-detection-status` polling, per-resource
+`describe-stack-resource-drifts` review, and reversion via ChangeSet — is
+documented as a procedure above but has not been executed against a real
+AWS account, and this document does not assert that it has.
 
-The full mutation, detection, per-resource review, reversion, and final
-`IN_SYNC` exercise must be performed later in a real authorized AWS account.
+## cfn-author deviations found and fixed
 
-## cfn-author reference audit
+Audited all four implemented stacks (`cfn/taxdocs-bootstrap-dev.yaml`,
+`cfn/taxdocs-network-dev.yaml`, `cfn/taxdocs-app-dev.yaml`,
+`cfn/taxdocs-artifacts-dev.yaml`) plus the validation workflow against the
+cfn-author Skill's conventions (`.claude/cfn-author/SKILL.md`) and the
+reference shapes.
 
-All six supplied reference shapes were compared with the implemented files:
+**Found and fixed in this audit:**
 
-- Bootstrap: the OIDC `aud` claim already used `StringEquals`; the final
-  template preserves it and uses repo-scoped `StringLike` only for `sub`.
-  The reference non-TLS bucket policy covered only selected S3 actions; the
-  implementation denies all insecure S3 operations. IAM allow actions remain
-  explicitly enumerated and resource scopes are limited to taxdocs stacks,
-  bootstrap objects, and taxdocs roles.
-- Network: the reference derived only six CIDRs and used a generic `IsHA`
-  condition. The implementation derives eight CIDRs as required and defines
-  `IsProdLike` plus its `IsDev` inverse. NAT B and C and their routes are
-  consistently conditional. No database resource is imported into Network.
-- Application: the reference attempted to create a secret that is an
-  out-of-band prerequisite and lacked explicit application-SG egress to RDS.
-  The implementation consumes the existing secret through a password dynamic
-  reference and owns both sides of the TCP 5432 rule without a circular stack
-  dependency.
-- Artifacts: the reference changed the required bucket name, omitted the
-  `GLACIER_IR` transition, and denied non-TLS access for only selected actions.
-  The implementation uses the required name, both transitions, and a complete
-  non-TLS deny.
-- Validation workflow: the reference pinned an older-than-required cfn-lint,
-  omitted bootstrap validation, did not fail on cfn-nag warnings, and attempted
-  real OIDC with a placeholder AWS account. The implementation validates all
-  templates and uses only a local Floci compatibility endpoint.
-- Infrastructure document: the reference used the nonexistent
-  `CREATE_OR_UPDATE` ChangeSet type, described the secret as stack-owned, and
-  asserted fabricated AWS Console drift results. This document separates
-  CREATE from UPDATE, records the out-of-band secret, and reports the
-  unsupported drift API honestly.
+- **OIDC `sub` claim over-broadened.** `CfnDeployRole`'s trust policy used
+  `StringLike` with a single repo-wide wildcard,
+  `repo:${GitHubOrg}/${GitHubRepo}:*`, matching any ref, environment, or
+  workflow in the repo. Fixed to the two exact patterns the deploy workflow
+  actually needs: `repo:${GitHubOrg}/${GitHubRepo}:ref:refs/heads/main` and
+  `repo:${GitHubOrg}/${GitHubRepo}:pull_request`. `aud` was already correctly
+  pinned with `StringEquals` in both the original and fixed versions — that
+  part was never wrong.
+- **CloudFormation action `Resource` used wildcard region/account.** The
+  `TaxdocsStackChangeSets` statement scoped `Resource` to
+  `arn:aws:cloudformation:*:*:stack/taxdocs-*` — name-scoped to the capstone
+  but not account/region-scoped. Fixed to
+  `!Sub "arn:aws:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/taxdocs-*"`,
+  matching the reference's pattern of pinning pseudo parameters wherever the
+  account/region are known statically.
 
-Across the implemented templates there is no literal `Action: "*"` and no
-unscoped `Resource: "*"`. Wildcard S3 actions appear only in explicit Deny
-statements for insecure transport. Every data resource requiring retention has
-the matching deletion and update-replacement policies.
+**Checked and confirmed correct (no fix needed):**
+
+- No password `Parameter` anywhere in `cfn/`; no `NoEcho: true` on any
+  parameter. RDS resolves the master password only via a Secrets Manager
+  dynamic reference (see above).
+- Every `DeletionPolicy: Retain` resource also carries
+  `UpdateReplacePolicy: Retain` — no unpaired occurrence found.
+- No literal `Action: "*"` anywhere in `cfn/`. The only `Action: "s3:*"`
+  occurrences (`taxdocs-bootstrap-dev.yaml`, `taxdocs-artifacts-dev.yaml`)
+  are on `Effect: Deny` statements scoped to a specific bucket ARN pair and
+  gated by `Condition: {Bool: {aws:SecureTransport: "false"}}` — the
+  deny-non-TLS hardening pattern, not a broad grant.
+  No bare `Resource: "*"` exists anywhere in `cfn/`.
+- IAM `Allow` actions are enumerated explicitly (never a service wildcard)
+  and every `Allow` `Resource` is scoped to `taxdocs-*` stack/changeSet ARNs,
+  the bootstrap bucket's own ARN, or `role/taxdocs-*` — no broad grant
+  reaches beyond this capstone's own resources.
+- Both S3 buckets that need it (`BootstrapBucket`, `ArtifactBucket`) pair
+  `DeletionPolicy: Retain` with `UpdateReplacePolicy: Retain`; no data
+  resource in `cfn/` has one without the other.
+
+Post-fix, `cfn-lint 1.56.0` reports 0 errors and `cfn-nag 0.8.10
+--fail-on-warnings` reports 0 failures / 0 warnings across all four
+templates.
 
 ## AWS versus Floci limitations
 
-Observed Floci limitations include:
+Explicit, so nothing here is mistaken for real AWS evidence:
 
-- GitHub OIDC federation and real STS trust enforcement are not exercised.
-- `validate-template` is compatibility-only, not authoritative AWS validation.
-- drift and `list-imports` APIs are unsupported.
-- deletion of an in-use network export was allowed; AWS export-in-use
-  protection was not proven. The network stack was recreated afterward.
-- S3 CloudFormation provisioning omitted some declared KMS, lifecycle,
-  public-access-block, and bucket-policy behavior.
-- RDS provisioning did not faithfully expose all declared encryption and
-  security-group properties.
-- security groups retained emulator-default egress rules not declared by the
-  templates.
-- the network tag update changed physical IDs despite a no-replacement
-  ChangeSet report.
-- `UpdateReplacePolicy: Retain` enforcement was not behaviorally verified.
-
-These limitations do not change the AWS-compatible source templates and must
-not be presented as real AWS evidence.
+- GitHub OIDC federation and real STS trust enforcement are not exercised
+  locally — Floci does not validate the `sub`/`aud` condition logic the way
+  AWS STS does.
+- Floci's `validate-template` is a wire-compatibility check only; it is not
+  authoritative AWS `ValidateTemplate` behavior and is documented as such in
+  the CI workflow output itself.
+- `DetectStackDrift` and related drift APIs are unsupported by Floci
+  (`UnknownAction`); no drift result has been produced or claimed against
+  this environment.
+- `cfn-lint` and `cfn-nag` are the meaningful, authoritative local
+  validation gates in this setup — Floci is execution/smoke-test only, per
+  the environment constraints for this capstone (no real AWS account is
+  available).
+- The CloudFormation templates in `cfn/` are authored as real
+  AWS-compatible CloudFormation throughout; nothing here has been rewritten
+  into emulator-specific shapes to make Floci happy.
