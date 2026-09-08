@@ -182,8 +182,11 @@ Resources:
                   - cloudformation:DeleteChangeSet
                   - cloudformation:DescribeChangeSet
                   - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackDriftDetectionStatus
+                  - cloudformation:DescribeStackResourceDrifts
                   - cloudformation:DescribeStackResources
                   - cloudformation:DescribeStacks
+                  - cloudformation:DetectStackDrift
                   - cloudformation:ExecuteChangeSet
                   - cloudformation:GetTemplate
                   - cloudformation:ValidateTemplate
