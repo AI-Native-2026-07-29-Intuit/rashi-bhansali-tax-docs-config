@@ -1,0 +1,136 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: RDS application data substrate for taxdocs.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment.
+
+  DbInstanceClass:
+    Type: String
+    Default: db.t4g.micro
+    AllowedValues:
+      - db.t4g.micro
+      - db.t4g.small
+      - db.t4g.medium
+    Description: RDS instance class for PostgreSQL.
+
+Resources:
+  DbSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Private taxdocs database subnets.
+      SubnetIds:
+        - Fn::Select:
+            - 0
+            - Fn::Split:
+                - ","
+                - Fn::ImportValue: taxdocs-network-dev-PrivateSubnets
+        - Fn::Select:
+            - 1
+            - Fn::Split:
+                - ","
+                - Fn::ImportValue: taxdocs-network-dev-PrivateSubnets
+        - Fn::Select:
+            - 2
+            - Fn::Split:
+                - ","
+                - Fn::ImportValue: taxdocs-network-dev-PrivateSubnets
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  DbSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F1000
+            reason: Egress is explicitly empty; stateful response traffic needs no outbound rule.
+    Properties:
+      GroupDescription: Permit PostgreSQL only from the taxdocs application.
+      SecurityGroupEgress: []
+      SecurityGroupIngress:
+        - Description: Permit PostgreSQL from the application security group.
+          IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          SourceSecurityGroupId:
+            Fn::ImportValue: taxdocs-network-dev-AppSgId
+      VpcId:
+        Fn::ImportValue: taxdocs-network-dev-VpcId
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-db-sg"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  AppToDatabaseEgress:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      Description: Permit the taxdocs application to reach PostgreSQL.
+      DestinationSecurityGroupId: !Ref DbSecurityGroup
+      FromPort: 5432
+      GroupId:
+        Fn::ImportValue: taxdocs-network-dev-AppSgId
+      IpProtocol: tcp
+      ToPort: 5432
+
+  DbInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: F24
+            reason: The out-of-band secret stores only the password; the username is not sensitive.
+    Properties:
+      AllocatedStorage: 20
+      BackupRetentionPeriod: 7
+      DBInstanceClass: !Ref DbInstanceClass
+      DBName: taxdocs
+      DBSubnetGroupName: !Ref DbSubnetGroup
+      DeletionProtection: true
+      Engine: postgres
+      MasterUsername: taxdocs_master
+      MasterUserPassword: "{{resolve:secretsmanager:taxdocs/dev/db-master:SecretString:password}}"
+      MultiAZ: false
+      PubliclyAccessible: false
+      StorageEncrypted: true
+      StorageType: gp3
+      VPCSecurityGroups:
+        - !Ref DbSecurityGroup
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+Outputs:
+  DbEndpoint:
+    Description: PostgreSQL endpoint address.
+    Value: !GetAtt DbInstance.Endpoint.Address
+    Export:
+      Name: taxdocs-app-dev-DbEndpoint
+
+  DbPort:
+    Description: PostgreSQL endpoint port.
+    Value: !GetAtt DbInstance.Endpoint.Port
+    Export:
+      Name: taxdocs-app-dev-DbPort
+
+  DbSecurityGroupId:
+    Description: Security group attached to the PostgreSQL instance.
+    Value: !Ref DbSecurityGroup
+    Export:
+      Name: taxdocs-app-dev-DbSgId

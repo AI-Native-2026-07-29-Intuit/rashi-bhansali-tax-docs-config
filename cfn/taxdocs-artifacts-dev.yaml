@@ -1,0 +1,78 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Hardened artifact storage for taxdocs.
+
+Resources:
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: Task 3 requires the stable name uptimecrew-taxdocs-artifacts-dev.
+          - id: W35
+            reason: Task 3 does not define a separate access-log destination.
+    Properties:
+      BucketName: uptimecrew-taxdocs-artifacts-dev
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ArchiveArtifacts
+            Status: Enabled
+            Transitions:
+              - StorageClass: STANDARD_IA
+                TransitionInDays: 90
+              - StorageClass: GLACIER_IR
+                TransitionInDays: 365
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Environment
+          Value: dev
+        - Key: Project
+          Value: taxdocs
+
+  ArtifactBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref ArtifactBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt ArtifactBucket.Arn
+              - !Join ["", [!GetAtt ArtifactBucket.Arn, "/*"]]
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+Outputs:
+  ArtifactBucketName:
+    Description: Name of the taxdocs artifact bucket.
+    Value: !Ref ArtifactBucket
+    Export:
+      Name: taxdocs-artifacts-dev-BucketName
+
+  ArtifactBucketArn:
+    Description: ARN of the taxdocs artifact bucket.
+    Value: !GetAtt ArtifactBucket.Arn
+    Export:
+      Name: taxdocs-artifacts-dev-BucketArn
