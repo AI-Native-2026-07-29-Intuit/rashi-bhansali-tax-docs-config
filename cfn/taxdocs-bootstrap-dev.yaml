@@ -1,0 +1,227 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Bootstrap storage and CloudFormation deployment role for taxdocs.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment.
+
+  RetentionDays:
+    Type: Number
+    Default: 30
+    MinValue: 7
+    MaxValue: 3650
+    Description: Days to retain noncurrent bootstrap bucket object versions.
+
+  GitHubOrg:
+    Type: String
+    Default: uptimecrew
+    Description: GitHub organization trusted by the deployment role.
+
+  GitHubRepo:
+    Type: String
+    Default: taxdocs-config
+    Description: GitHub repository trusted by the deployment role.
+
+Resources:
+  AccessLogBucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W35
+            reason: Access log destination buckets cannot log to themselves.
+    Properties:
+      BucketName: !Sub "uptimecrew-taxdocs-bootstrap-logs-${EnvName}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireAccessLogs
+            Status: Enabled
+            ExpirationInDays: !Ref RetentionDays
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  AccessLogBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref AccessLogBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowS3ServerAccessLogs
+            Effect: Allow
+            Principal:
+              Service: logging.s3.amazonaws.com
+            Action:
+              - s3:PutObject
+            Resource: !Join
+              - ""
+              - - !GetAtt AccessLogBucket.Arn
+                - !Sub "/bootstrap/${EnvName}/*"
+            Condition:
+              ArnLike:
+                "aws:SourceArn": !Sub "arn:aws:s3:::uptimecrew-taxdocs-bootstrap-${EnvName}-${AWS::AccountId}"
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt AccessLogBucket.Arn
+              - !Join ["", [!GetAtt AccessLogBucket.Arn, "/*"]]
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+  BootstrapBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: AccessLogBucketPolicy
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName: !Sub "uptimecrew-taxdocs-bootstrap-${EnvName}-${AWS::AccountId}"
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: alias/aws/s3
+            BucketKeyEnabled: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: ExpireNoncurrentVersions
+            Status: Enabled
+            NoncurrentVersionExpiration:
+              NoncurrentDays: !Ref RetentionDays
+      LoggingConfiguration:
+        DestinationBucketName: !Ref AccessLogBucket
+        LogFilePrefix: !Sub "bootstrap/${EnvName}/"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  BootstrapBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref BootstrapBucket
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt BootstrapBucket.Arn
+              - !Join ["", [!GetAtt BootstrapBucket.Arn, "/*"]]
+            Condition:
+              Bool:
+                "aws:SecureTransport": "false"
+
+  CfnDeployRole:
+    Type: AWS::IAM::Role
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The task requires the stable role name taxdocs-api-cfn-deploy.
+    Properties:
+      RoleName: taxdocs-api-cfn-deploy
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: GitHubActionsOidcTrust
+            Effect: Allow
+            Principal:
+              Federated: !Sub "arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com"
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+              StringLike:
+                "token.actions.githubusercontent.com:sub": !Sub "repo:${GitHubOrg}/${GitHubRepo}:*"
+      Policies:
+        - PolicyName: taxdocs-cloudformation-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: TaxdocsStackChangeSets
+                Effect: Allow
+                Action:
+                  - cloudformation:CreateChangeSet
+                  - cloudformation:DeleteChangeSet
+                  - cloudformation:DescribeChangeSet
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ExecuteChangeSet
+                  - cloudformation:GetTemplate
+                  - cloudformation:ValidateTemplate
+                Resource: "arn:aws:cloudformation:*:*:stack/taxdocs-*"
+              - Sid: BootstrapTemplateRead
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt BootstrapBucket.Arn
+                  - !Join ["", [!GetAtt BootstrapBucket.Arn, "/*"]]
+              - Sid: PassTaxdocsRoles
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:role/taxdocs-*"
+      Tags:
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+Outputs:
+  BootstrapBucketName:
+    Description: Name of the bootstrap template bucket.
+    Value: !Ref BootstrapBucket
+    Export:
+      Name: !Sub "${AWS::StackName}-BootstrapBucketName"
+
+  BootstrapBucketArn:
+    Description: ARN of the bootstrap template bucket.
+    Value: !GetAtt BootstrapBucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-BootstrapBucketArn"
+
+  CfnDeployRoleArn:
+    Description: ARN of the GitHub Actions CloudFormation deployment role.
+    Value: !GetAtt CfnDeployRole.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-CfnDeployRoleArn"
