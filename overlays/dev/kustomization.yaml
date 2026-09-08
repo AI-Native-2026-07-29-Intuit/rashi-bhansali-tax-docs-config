@@ -1,0 +1,71 @@
+# The dev overlay -- the smallest viable patch over the W5 D3 base.
+# Same shape repeats at overlays/staging/ and overlays/prod/ with
+# different namespace + replica + image-tag patches.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind:       Kustomization
+
+# Base: the unchanged W5 D3 manifests, copied verbatim into the
+# config repo at base/. Kept identical across envs.
+resources:
+  - ../../base
+  # Local-cluster-only bridge Services/Endpoints for the Compose-managed
+  # postgres/redis/kafka/mongo containers -- dev-only, never in base since
+  # staging/prod must not inherit these hardcoded container IPs.
+  - 05-taxdocs-dev.external-datastores.yaml
+
+# Per-env namespace -- Kustomize rewrites every resource's
+# metadata.namespace at build time.
+namespace: taxdocs-dev
+
+# Image-tag rewrite -- the CI bump-config workflow rewrites the
+# digest portion only; Kustomize merges it onto the rendered
+# Deployment without touching the base manifest.
+images:
+  - name:    uptimecrew/taxdocs-api
+    newName: uptimecrew/taxdocs-api
+    newTag:  0.1.1
+
+# No Kustomize `replicas:` block here: base/50-taxdocs-api.hpa.yaml owns
+# spec.replicas for taxdocs-api once the HPA is attached, so a separate
+# Kustomize replicas patch would fight it every reconcile -- HPA scales back
+# to its floor immediately after each Argo CD sync, showing as perpetual
+# OutOfSync. Instead, dev's floor is lowered via the HPA patch below so the
+# HPA and Kustomize agree on a resting replica count of 1.
+
+# Sync-wave via commonAnnotations: stamps argocd.argoproj.io/sync-wave: "-1"
+# onto EVERY resource in this overlay, not just Namespace -- Deployment,
+# Service, ConfigMap, etc. all land in the same wave as Namespace. This
+# means nothing is actually staggered against the Namespace anymore (a
+# real behavior change from the previous per-resource JSON-patch design,
+# which put only Namespace+ConfigMap in wave -1 and left Deployment at
+# the default wave 0). Chosen deliberately per instruction; the prior
+# per-resource-patch approach remains the way to stagger waves for real.
+commonAnnotations:
+  argocd.argoproj.io/sync-wave: "-1"
+
+# Per-env config patch -- override the W5 D3 ConfigMap entries
+# that should differ between envs (Spring profile, log level,
+# feature flags).
+patches:
+  - target:
+      kind: ConfigMap
+      name: taxdocs-api-config
+    patch: |-
+      # SPRING_PROFILES_ACTIVE deliberately NOT patched: the app's real application.yml
+      # defines exactly three profile documents -- default (local), test, and a combined
+      # prod,k8s (banner-mode only, confirmed via direct read of application.yml). There is
+      # no standalone `dev` or `k8s` profile; naming one that doesn't exist doesn't fail
+      # loudly, it silently falls back to the default/local block. Base ships `k8s` (also
+      # not a real standalone profile name) -- left as-is here since dev's own datastore
+      # hostnames/credentials are already correct via base and this key does not change
+      # runtime behavior either way for dev's known-working state.
+      - op: replace
+        path: /data/LOGGING_LEVEL_ROOT
+        value: DEBUG
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: taxdocs-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1

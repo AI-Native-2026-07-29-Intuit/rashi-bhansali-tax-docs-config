@@ -1,0 +1,93 @@
+# overlays/staging/kustomization.yaml - same shape as dev, staging-sized.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  # Local-cluster-only bridge Services/Endpoints for the Compose-managed
+  # postgres/redis/kafka/mongo containers -- own isolated Compose project
+  # (taxdocs_staging), never in base since dev/prod must not share it.
+  - 05-taxdocs-staging.external-datastores.yaml
+
+namespace: taxdocs-staging
+
+# Sync-wave via commonAnnotations: stamps argocd.argoproj.io/sync-wave: "-1"
+# onto EVERY resource in this overlay, not just Namespace -- see dev's
+# overlay for the full tradeoff (nothing is actually staggered anymore,
+# chosen deliberately per instruction).
+commonAnnotations:
+  argocd.argoproj.io/sync-wave: "-1"
+
+patches:
+  - target:
+      kind: ConfigMap
+      name: taxdocs-api-config
+    patch: |-
+      # SPRING_PROFILES_ACTIVE deliberately left at base's `k8s` -- see the prod overlay for
+      # the full reasoning (confirmed by direct read of application.yml: only default/local,
+      # test, and combined prod,k8s profiles exist). Staging has no real profile of its own
+      # to activate; per-env divergence lives entirely in the config values below.
+      - op: replace
+        path: /data/LOGGING_LEVEL_ROOT
+        value: INFO
+      # base/ carries the W5 D3 hostnames verbatim, which all resolve into taxdocs-dev.
+      # Without these four overrides staging would share dev's Postgres, Redis, and Kafka --
+      # the `namespace:` transformer rewrites resource metadata, never ConfigMap *values*.
+      - op: replace
+        path: /data/SPRING_DATASOURCE_URL
+        value: jdbc:postgresql://postgres.taxdocs-staging.svc.cluster.local:5432/taxdocs_staging
+      - op: replace
+        path: /data/SPRING_DATASOURCE_USERNAME
+        value: taxdocs_staging
+      - op: replace
+        path: /data/SPRING_DATA_REDIS_HOST
+        value: redis.taxdocs-staging.svc.cluster.local
+      - op: replace
+        path: /data/SPRING_KAFKA_BOOTSTRAP_SERVERS
+        value: kafka.taxdocs-staging.svc.cluster.local:9092
+  # base/ hardcodes the dev hostname, and an Ingress host+path pair is CLUSTER-scoped as far as
+  # the nginx controller is concerned. Without this override, staging's sync is rejected by
+  # nginx's validating webhook -- confirmed live: `host "taxdocs.dev.uptimecrew.internal" and
+  # path "/" is already defined in ingress taxdocs-dev/taxdocs-api`. Three envs sharing one
+  # cluster need three distinct hostnames, not three namespaces.
+  - target:
+      kind: Ingress
+      name: taxdocs-api
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: taxdocs.staging.uptimecrew.internal
+  # spec.namespaceSelector.matchNames is a plain string inside the ServiceMonitor CR's spec,
+  # not metadata.namespace -- the `namespace:` transformer above never touches it. Without this
+  # patch, staging's ServiceMonitor keeps watching taxdocs-dev and Prometheus never discovers
+  # staging's pods at all.
+  - target:
+      kind: ServiceMonitor
+      name: taxdocs-api
+    patch: |-
+      - op: replace
+        path: /spec/namespaceSelector/matchNames/0
+        value: taxdocs-staging
+
+  # Env sizing on the HPA, not spec.replicas -- see the dev overlay for why pinning replicas
+  # against a base HPA makes Argo CD and the autoscaler trade writes forever.
+  - target:
+      kind: Deployment
+      name: taxdocs-api
+    patch: |-
+      - op: remove
+        path: /spec/replicas
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: taxdocs-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 2
+      - op: replace
+        path: /spec/maxReplicas
+        value: 4
+
+images:
+  - name: uptimecrew/taxdocs-api
+    newTag: 0.1.1
