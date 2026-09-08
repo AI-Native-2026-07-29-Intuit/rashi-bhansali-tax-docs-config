@@ -43,6 +43,8 @@ Resources:
           Value: !Ref EnvName
         - Key: Project
           Value: taxdocs
+        - Key: ManagedBy
+          Value: CloudFormation
 
   InternetGateway:
     Type: AWS::EC2::InternetGateway
