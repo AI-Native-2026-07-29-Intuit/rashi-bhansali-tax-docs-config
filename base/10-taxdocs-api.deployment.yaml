@@ -49,6 +49,16 @@ spec:
                 name: taxdocs-api-config
             - secretRef:
                 name: taxdocs-api-secrets
+          env:
+            # Kept as an explicit secretKeyRef (not folded into
+            # taxdocs-api-secrets/envFrom above) so this one credential has
+            # its own Secret object, lifecycle, and rotation path, separate
+            # from the DB password.
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: anthropic-api
+                  key: ANTHROPIC_API_KEY
           # Memory-safety flags (-XX:MaxRAMPercentage, -XX:+ExitOnOutOfMemoryError) are baked
           # into the image's ENTRYPOINT (Dockerfile) as literal java args, not passed here via
           # JAVA_TOOL_OPTIONS -- that env var makes the JVM print a "Picked up
