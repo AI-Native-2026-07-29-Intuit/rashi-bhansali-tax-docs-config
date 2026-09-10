@@ -167,6 +167,14 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "taxdocs-${EnvName}-nat-a"
+        - Key: service
+          Value: taxdocs
+        - Key: env
+          Value: !Ref EnvName
+        - Key: tenant
+          Value: shared
+        - Key: feature
+          Value: summarize-document
 
   NatEipB:
     Type: AWS::EC2::EIP
@@ -187,6 +195,14 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "taxdocs-${EnvName}-nat-b"
+        - Key: service
+          Value: taxdocs
+        - Key: env
+          Value: !Ref EnvName
+        - Key: tenant
+          Value: shared
+        - Key: feature
+          Value: summarize-document
 
   NatEipC:
     Type: AWS::EC2::EIP
@@ -207,6 +223,14 @@ Resources:
       Tags:
         - Key: Name
           Value: !Sub "taxdocs-${EnvName}-nat-c"
+        - Key: service
+          Value: taxdocs
+        - Key: env
+          Value: !Ref EnvName
+        - Key: tenant
+          Value: shared
+        - Key: feature
+          Value: summarize-document
 
   PublicRouteTable:
     Type: AWS::EC2::RouteTable

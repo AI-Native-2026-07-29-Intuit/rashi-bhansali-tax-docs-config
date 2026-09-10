@@ -52,6 +52,13 @@ jobs:
       - name: Run cfn-nag
         run: cfn_nag_scan --input-path cfn --fail-on-warnings --output-format txt
 
+      - name: Reject notBreaching billing alarm configuration
+        run: |
+          if grep -RIn "notBreaching" cfn/; then
+            echo "::error::Billing alarms must not use TreatMissingData=notBreaching"
+            exit 1
+          fi
+
       - name: Wait for local Floci
         run: |
           for _ in {1..30}; do
