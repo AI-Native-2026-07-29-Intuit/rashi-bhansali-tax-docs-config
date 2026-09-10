@@ -116,6 +116,17 @@ deploying `taxdocs-app-dev` before the secret exists fails at
 `CREATE_IN_PROGRESS` on `DbInstance`. This precondition is recorded here so
 it isn't rediscovered as a deploy-time surprise.
 
+Before the first `taxdocs-app-dev` deployment, create the database secret out-of-band:
+
+```bash
+aws secretsmanager create-secret \
+  --name taxdocs/dev/db-master \
+  --secret-string '{"password":"REPLACE_ME_LOCAL_DEV_ONLY"}' \
+  --region us-east-1
+```
+
+Use an environment-appropriate secret value; never commit the password to the template or repository. The app stack resolves the `password` key at deploy time through the Secrets Manager dynamic reference.
+
 ## Retention rules
 
 Every stateful resource in `cfn/` carries both policies, not just one:
