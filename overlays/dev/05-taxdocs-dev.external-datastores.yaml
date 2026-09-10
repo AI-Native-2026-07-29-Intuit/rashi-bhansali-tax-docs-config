@@ -29,7 +29,7 @@ metadata:
   namespace: taxdocs-dev
 subsets:
   - addresses:
-      - ip: 172.19.0.2
+      - ip: 172.19.0.8
     ports:
       - name: postgres
         port: 5432
@@ -57,7 +57,7 @@ metadata:
   namespace: taxdocs-dev
 subsets:
   - addresses:
-      - ip: 172.19.0.4
+      - ip: 172.19.0.7
     ports:
       - name: mongo
         port: 27017
@@ -85,7 +85,7 @@ metadata:
   namespace: taxdocs-dev
 subsets:
   - addresses:
-      - ip: 172.19.0.3
+      - ip: 172.19.0.5
     ports:
       - name: redis
         port: 6379
@@ -113,7 +113,7 @@ metadata:
   namespace: taxdocs-dev
 subsets:
   - addresses:
-      - ip: 172.19.0.5
+      - ip: 172.19.0.6
     ports:
       - name: kafka
         port: 9092
