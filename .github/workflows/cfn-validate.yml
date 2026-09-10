@@ -1,0 +1,72 @@
+name: CloudFormation validation
+
+on:
+  pull_request:
+    paths:
+      - "cfn/**"
+      - ".github/workflows/cfn-validate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Lint, security scan, and compatibility check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      floci:
+        image: floci/floci:2.0.1
+        ports:
+          - 4566:4566
+    env:
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://localhost:4566
+      AWS_EC2_METADATA_DISABLED: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@39cd14951b08e74b54015e9e001cdefcf80e669f # v5.1.1
+        with:
+          python-version: "3.12"
+
+      - name: Install cfn-lint
+        run: python -m pip install --disable-pip-version-check cfn-lint==1.56.0
+
+      - name: Set up Ruby
+        uses: ruby/setup-ruby@a4effe49ee8ee5b8b5091268c473a4628afb5651 # v1.211.0
+        with:
+          ruby-version: "3.3"
+
+      - name: Install cfn-nag
+        run: gem install cfn-nag -v 0.8.10 --no-document
+
+      - name: Run cfn-lint
+        run: cfn-lint cfn/*.yaml
+
+      - name: Run cfn-nag
+        run: cfn_nag_scan --input-path cfn --fail-on-warnings --output-format txt
+
+      - name: Wait for local Floci
+        run: |
+          for _ in {1..30}; do
+            if aws cloudformation list-stacks >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Floci did not become ready"
+          exit 1
+
+      - name: Run CloudFormation compatibility validation
+        run: |
+          echo "Compatibility check only; cfn-lint and cfn-nag are authoritative locally."
+          for template in cfn/*.yaml; do
+            aws cloudformation validate-template \
+              --template-body "file://${template}" >/dev/null
+          done

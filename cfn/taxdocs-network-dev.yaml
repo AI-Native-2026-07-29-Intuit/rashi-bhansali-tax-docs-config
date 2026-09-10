@@ -1,0 +1,389 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Three-AZ network substrate for taxdocs.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - staging
+      - prod
+    Description: Deployment environment controlling NAT gateway topology.
+
+  VpcCidr:
+    Type: String
+    Default: 10.40.0.0/16
+    AllowedPattern: '^((25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9]{2}|[1-9]?[0-9])/(3[0-2]|[12]?[0-9])$'
+    ConstraintDescription: Must be a valid IPv4 CIDR such as 10.40.0.0/16.
+    Description: IPv4 CIDR assigned to the taxdocs VPC.
+
+Conditions:
+  IsProdLike: !Or
+    - !Equals [!Ref EnvName, staging]
+    - !Equals [!Ref EnvName, prod]
+  IsDev: !Not [!Condition IsProdLike]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W60
+            reason: Task 2 does not define a flow-log destination or delivery role.
+    Properties:
+      CidrBlock: !Ref VpcCidr
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-vpc"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+        - Key: ManagedBy
+          Value: CloudFormation
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-igw"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref Vpc
+
+  PublicSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [0, !Cidr [!Ref VpcCidr, 8, 8]]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-public-a"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  PublicSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [1, !Cidr [!Ref VpcCidr, 8, 8]]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-public-b"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  PublicSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: !Select [2, !Cidr [!Ref VpcCidr, 8, 8]]
+      MapPublicIpOnLaunch: false
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-public-c"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  PrivateSubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: !Select [3, !Cidr [!Ref VpcCidr, 8, 8]]
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-private-a"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  PrivateSubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      CidrBlock: !Select [4, !Cidr [!Ref VpcCidr, 8, 8]]
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-private-b"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  PrivateSubnetC:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [2, !GetAZs ""]
+      CidrBlock: !Select [5, !Cidr [!Ref VpcCidr, 8, 8]]
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-private-c"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+  NatEipA:
+    Type: AWS::EC2::EIP
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-nat-eip-a"
+
+  NatGatewayA:
+    Type: AWS::EC2::NatGateway
+    Properties:
+      AllocationId: !GetAtt NatEipA.AllocationId
+      SubnetId: !Ref PublicSubnetA
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-nat-a"
+
+  NatEipB:
+    Type: AWS::EC2::EIP
+    Condition: IsProdLike
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-nat-eip-b"
+
+  NatGatewayB:
+    Type: AWS::EC2::NatGateway
+    Condition: IsProdLike
+    Properties:
+      AllocationId: !GetAtt NatEipB.AllocationId
+      SubnetId: !Ref PublicSubnetB
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-nat-b"
+
+  NatEipC:
+    Type: AWS::EC2::EIP
+    Condition: IsProdLike
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-nat-eip-c"
+
+  NatGatewayC:
+    Type: AWS::EC2::NatGateway
+    Condition: IsProdLike
+    Properties:
+      AllocationId: !GetAtt NatEipC.AllocationId
+      SubnetId: !Ref PublicSubnetC
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-nat-c"
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-public-rt"
+
+  PublicDefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetA
+
+  PublicRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetB
+
+  PublicRouteTableAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnetC
+
+  PrivateRouteTableA:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-private-a-rt"
+
+  PrivateDefaultRouteA:
+    Type: AWS::EC2::Route
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayA
+      RouteTableId: !Ref PrivateRouteTableA
+
+  PrivateRouteTableAssociationA:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      SubnetId: !Ref PrivateSubnetA
+
+  PrivateRouteTableAssociationBDev:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: IsDev
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      SubnetId: !Ref PrivateSubnetB
+
+  PrivateRouteTableAssociationCDev:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: IsDev
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableA
+      SubnetId: !Ref PrivateSubnetC
+
+  PrivateRouteTableB:
+    Type: AWS::EC2::RouteTable
+    Condition: IsProdLike
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-private-b-rt"
+
+  PrivateDefaultRouteB:
+    Type: AWS::EC2::Route
+    Condition: IsProdLike
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayB
+      RouteTableId: !Ref PrivateRouteTableB
+
+  PrivateRouteTableAssociationB:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: IsProdLike
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableB
+      SubnetId: !Ref PrivateSubnetB
+
+  PrivateRouteTableC:
+    Type: AWS::EC2::RouteTable
+    Condition: IsProdLike
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-private-c-rt"
+
+  PrivateDefaultRouteC:
+    Type: AWS::EC2::Route
+    Condition: IsProdLike
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      NatGatewayId: !Ref NatGatewayC
+      RouteTableId: !Ref PrivateRouteTableC
+
+  PrivateRouteTableAssociationC:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Condition: IsProdLike
+    Properties:
+      RouteTableId: !Ref PrivateRouteTableC
+      SubnetId: !Ref PrivateSubnetC
+
+  AppSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W5
+            reason: Task 2 explicitly requires TCP 443 egress to the internet.
+    Properties:
+      GroupDescription: Permit the taxdocs application port inside the VPC.
+      SecurityGroupEgress:
+        - Description: Permit HTTPS access to external AWS and internet endpoints.
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      SecurityGroupIngress:
+        - Description: Permit application traffic only from within the VPC.
+          IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          CidrIp: !Ref VpcCidr
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "taxdocs-${EnvName}-app-sg"
+        - Key: Environment
+          Value: !Ref EnvName
+        - Key: Project
+          Value: taxdocs
+
+Outputs:
+  VpcId:
+    Description: ID of the taxdocs VPC.
+    Value: !Ref Vpc
+    Export:
+      Name: taxdocs-network-dev-VpcId
+
+  PublicSubnets:
+    Description: Comma-separated IDs of the three public subnets.
+    Value: !Join
+      - ","
+      - - !Ref PublicSubnetA
+        - !Ref PublicSubnetB
+        - !Ref PublicSubnetC
+    Export:
+      Name: taxdocs-network-dev-PublicSubnets
+
+  PrivateSubnets:
+    Description: Comma-separated IDs of the three private subnets.
+    Value: !Join
+      - ","
+      - - !Ref PrivateSubnetA
+        - !Ref PrivateSubnetB
+        - !Ref PrivateSubnetC
+    Export:
+      Name: taxdocs-network-dev-PrivateSubnets
+
+  AppSgId:
+    Description: ID of the taxdocs application security group.
+    Value: !Ref AppSecurityGroup
+    Export:
+      Name: taxdocs-network-dev-AppSgId
