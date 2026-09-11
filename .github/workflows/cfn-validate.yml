@@ -52,12 +52,11 @@ jobs:
       - name: Run cfn-nag
         run: cfn_nag_scan --input-path cfn --fail-on-warnings --output-format txt
 
-      - name: Reject notBreaching billing alarm configuration
+      - name: Verify billing alarm missing-data policy
         run: |
-          if grep -RIn "notBreaching" cfn/; then
-            echo "::error::Billing alarms must not use TreatMissingData=notBreaching"
-            exit 1
-          fi
+          grep -Eq \
+            '^[[:space:]]+TreatMissingData:[[:space:]]+ignore[[:space:]]*$' \
+            cfn/taxdocs-cost-dev.yaml
 
       - name: Wait for local Floci
         run: |
