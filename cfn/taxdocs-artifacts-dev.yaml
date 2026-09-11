@@ -45,6 +45,14 @@ Resources:
           Value: dev
         - Key: Project
           Value: taxdocs
+        - Key: service
+          Value: taxdocs
+        - Key: env
+          Value: dev
+        - Key: tenant
+          Value: shared
+        - Key: feature
+          Value: summarize-document
 
   ArtifactBucketPolicy:
     Type: AWS::S3::BucketPolicy
