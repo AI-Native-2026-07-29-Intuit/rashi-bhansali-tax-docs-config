@@ -97,6 +97,18 @@ spec:
             - /stringData/DB_PASSWORD
           managedFieldsManagers:
             - local-secret-override
+        # Same out-of-band-credential pattern as taxdocs-api-secrets above,
+        # for the Anthropic API key: applied per env via kubectl
+        # --field-manager=local-secret-override against a gitignored
+        # *.secret.local.yaml, never committed.
+        - group: ""
+          kind:  Secret
+          name:  anthropic-api
+          jsonPointers:
+            - /data/ANTHROPIC_API_KEY
+            - /stringData/ANTHROPIC_API_KEY
+          managedFieldsManagers:
+            - local-secret-override
         # spec.replicas on dev's Deployment is HPA-owned (base's HPA has no
         # replicas patch in overlays/dev, unlike staging/prod which drop the
         # HPA entirely and pin a fixed count instead). The HPA scales it

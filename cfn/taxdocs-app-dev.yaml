@@ -115,6 +115,14 @@ Resources:
           Value: !Ref EnvName
         - Key: Project
           Value: taxdocs
+        - Key: service
+          Value: taxdocs
+        - Key: env
+          Value: !Ref EnvName
+        - Key: tenant
+          Value: shared
+        - Key: feature
+          Value: summarize-document
 
 Outputs:
   DbEndpoint:

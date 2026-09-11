@@ -52,6 +52,12 @@ jobs:
       - name: Run cfn-nag
         run: cfn_nag_scan --input-path cfn --fail-on-warnings --output-format txt
 
+      - name: Verify billing alarm missing-data policy
+        run: |
+          grep -Eq \
+            '^[[:space:]]+TreatMissingData:[[:space:]]+ignore[[:space:]]*$' \
+            cfn/taxdocs-cost-dev.yaml
+
       - name: Wait for local Floci
         run: |
           for _ in {1..30}; do

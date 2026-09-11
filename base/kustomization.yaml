@@ -9,6 +9,7 @@ resources:
   - 20-taxdocs-api.service.yaml
   - 30-taxdocs-api.configmap.yaml
   - 40-taxdocs-api.secret.yaml
+  - 45-taxdocs-api.anthropic.secret.yaml
   - 50-taxdocs-api.hpa.yaml
   - 60-taxdocs-api.ingress.yaml
   - 70-taxdocs-api.servicemonitor.yaml

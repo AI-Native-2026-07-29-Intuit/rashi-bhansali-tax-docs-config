@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  AWS-resident cost governance for taxdocs. This stack does not govern
+  Anthropic API spend, which requires separate provider-side controls.
+
+Parameters:
+  EnvName:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+    Description: Deployment environment used by the AWS cost-allocation filters.
+
+  MonthlyBudgetUsd:
+    Type: Number
+    Default: 100
+    MinValue: 1
+    Description: Monthly budget for tagged AWS-resident spend.
+
+  BillingAlarmUsd:
+    Type: Number
+    Default: 120
+    MinValue: 1
+    Description: Account-wide EstimatedCharges alarm threshold in USD.
+
+Resources:
+  CostAlarmsTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: taxdocs-cost-alarms-dev
+      KmsMasterKeyId: alias/aws/sns
+      Tags:
+        - Key: service
+          Value: taxdocs
+        - Key: env
+          Value: !Ref EnvName
+        - Key: tenant
+          Value: shared
+        - Key: feature
+          Value: summarize-document
+
+  CostAlarmsTopicPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      Topics:
+        - !Ref CostAlarmsTopic
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowBudgetsPublish
+            Effect: Allow
+            Principal:
+              Service: budgets.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref CostAlarmsTopic
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+          - Sid: AllowCloudWatchPublish
+            Effect: Allow
+            Principal:
+              Service: cloudwatch.amazonaws.com
+            Action: sns:Publish
+            Resource: !Ref CostAlarmsTopic
+            Condition:
+              StringEquals:
+                "aws:SourceAccount": !Ref AWS::AccountId
+
+  MonthlyCostBudget:
+    Type: AWS::Budgets::Budget
+    Properties:
+      Budget:
+        BudgetName: taxdocs-monthly-cost-dev
+        BudgetType: COST
+        TimeUnit: MONTHLY
+        BudgetLimit:
+          Amount: !Ref MonthlyBudgetUsd
+          Unit: USD
+        CostFilters:
+          TagKeyValue:
+            - "user:service$taxdocs"
+            - !Join ["", ["user:env$", !Ref EnvName]]
+      NotificationsWithSubscribers:
+        - Notification:
+            NotificationType: FORECASTED
+            ComparisonOperator: GREATER_THAN
+            Threshold: 80
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref CostAlarmsTopic
+        - Notification:
+            NotificationType: ACTUAL
+            ComparisonOperator: GREATER_THAN
+            Threshold: 100
+            ThresholdType: PERCENTAGE
+          Subscribers:
+            - SubscriptionType: SNS
+              Address: !Ref CostAlarmsTopic
+
+  # AWS/Billing publishes EstimatedCharges only in us-east-1. Deploy this
+  # stack there. This alarm is account-wide and cannot be filtered by tag.
+  EstimatedChargesAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Metadata:
+      cfn_nag:
+        rules_to_suppress:
+          - id: W28
+            reason: The task requires the stable alarm name taxdocs/estimated-charges-dev.
+    Properties:
+      AlarmName: taxdocs/estimated-charges-dev
+      AlarmDescription: Account-wide AWS EstimatedCharges threshold.
+      Namespace: AWS/Billing
+      MetricName: EstimatedCharges
+      Dimensions:
+        - Name: Currency
+          Value: USD
+      Statistic: Maximum
+      Period: 21600
+      EvaluationPeriods: 1
+      Threshold: !Ref BillingAlarmUsd
+      ComparisonOperator: GreaterThanThreshold
+      TreatMissingData: ignore
+      ActionsEnabled: true
+      AlarmActions:
+        - !Ref CostAlarmsTopic
+
+Outputs:
+  CostAlarmsTopicArn:
+    Description: SNS topic receiving AWS Budget and billing alarm notifications.
+    Value: !Ref CostAlarmsTopic
+    Export:
+      Name: !Sub "${AWS::StackName}-CostAlarmsTopicArn"
