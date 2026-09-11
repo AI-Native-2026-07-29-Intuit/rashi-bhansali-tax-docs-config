@@ -1,0 +1,22 @@
+# base/55-taxdocs-api.pdb.yaml
+# W6D2 Task 2: protect the floor. minAvailable matches the HPA's
+# minReplicas (base/50-taxdocs-api.hpa.yaml) so a voluntary disruption
+# (node drain, consolidation) never takes the service below two serving
+# pods. Selector matches the real taxdocs-api pod labels
+# (base/10-taxdocs-api.deployment.yaml), not the reference file's plain
+# `app: taxdocs-api` shape.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: taxdocs-api-pdb
+  namespace: taxdocs-dev
+  labels:
+    app.kubernetes.io/name: taxdocs-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taxdocs-api
