@@ -64,7 +64,7 @@ patches:
         value: DEBUG
   - target:
       kind: HorizontalPodAutoscaler
-      name: taxdocs-api
+      name: taxdocs-api-hpa
     patch: |-
       - op: replace
         path: /spec/minReplicas
