@@ -1,0 +1,79 @@
+# k8s/aws-authored/taxdocs-worker-scaledobject.sqs.yaml
+#
+# AUTHOR-AND-DEFEND ONLY -- do NOT apply to k3d. This is the production
+# form of Task 1's plaintext Kafka ScaledObject: on a managed EKS cluster,
+# the worker scales on SQS queue depth instead of Kafka consumer-group
+# lag, and needs a real AWS SQS queue + IAM role to mean anything. Never
+# applied to, or tested against, real AWS SQS/IAM in this exercise (the
+# optional Floci-based identity-flow spike below is a separate, explicitly
+# non-production experiment -- see the Floci note at the bottom).
+#
+# Credential placement is the point of this file, not the trigger syntax:
+# the SQS GetQueueAttributes permission (which KEDA's aws-sqs-queue scaler
+# calls to read ApproximateNumberOfMessages) belongs on the KEDA OPERATOR's
+# own AWS identity, never on the taxdocs-api-worker pod's identity.
+# identityOwner: keda below means "the KEDA operator's own pod identity
+# authenticates to AWS and performs the GetQueueAttributes call on the
+# ScaledObject's behalf" -- the worker Deployment itself carries no AWS
+# credentials, no IAM role, and no SQS permissions at all. If the worker
+# pod's own identity had this permission instead, every container in that
+# Deployment (including anything an attacker got code execution in) could
+# call SQS APIs directly; keeping it on the operator's identity means a
+# compromised worker pod has no path to AWS SQS credentials.
+#
+# No roleArn, access key, or secret appears anywhere in this file --
+# identityOwner: keda + provider: aws-eks means the actual AWS identity is
+# never named here at all. Real deployment binds it via IRSA (IAM Roles
+# for Service Accounts): the KEDA operator's ServiceAccount carries an
+# `eks.amazonaws.com/role-arn` annotation (set outside this file, on the
+# KEDA Helm release/ServiceAccount) pointing at an IAM role scoped to
+# exactly `sqs:GetQueueAttributes` on this one queue ARN, nothing broader.
+#
+# KEDA version note: this repo's actual installed KEDA is 2.20.2
+# (`helm list -n keda`, confirmed against the running k3d cluster). Its
+# TriggerAuthentication CRD schema (`kubectl get crd
+# triggerauthentications.keda.sh -o jsonpath=...`) only accepts
+# identityOwner: keda|workload, NOT identityOwner: operator, and its
+# podIdentity.provider enum includes aws-eks (EKS-specific, not just
+# aws) -- both used below instead of the more generic/older values a
+# reference shape used, since the task asked to align fields with the
+# KEDA version this project actually runs, not copy an unverified shape.
+---
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: taxdocs-aws-auth
+  namespace: taxdocs-dev
+spec:
+  podIdentity:
+    provider: aws-eks
+    identityOwner: keda # the KEDA operator's own identity, never the workload's
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: taxdocs-worker-scaledobject-sqs
+  namespace: taxdocs-dev
+spec:
+  scaleTargetRef:
+    name: taxdocs-api-worker
+  minReplicaCount: 0
+  maxReplicaCount: 20
+  triggers:
+    - type: aws-sqs-queue
+      metadata:
+        queueURL: https://sqs.us-east-1.amazonaws.com/${AWS_ACCOUNT_ID}/taxdocs-ingest-dev
+        queueLength: "10"
+        awsRegion: us-east-1
+        identityOwner: keda
+      authenticationRef:
+        name: taxdocs-aws-auth
+
+# Floci note: the Floci/AWS emulator MAY optionally be used to exercise the
+# STS/IAM identity-assumption flow this TriggerAuthentication implies
+# (e.g. confirming the KEDA operator's IRSA-style role-assumption call
+# shape against a local STS stub) -- that is an identity-flow experiment
+# only, run and reported separately from any claim about this file. A
+# green Floci run does NOT prove real EKS IRSA, real SQS queue-depth
+# scaling, or real AWS IAM policy enforcement; only genuine AWS validates
+# those.

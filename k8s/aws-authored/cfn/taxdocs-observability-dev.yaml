@@ -1,0 +1,46 @@
+# k8s/aws-authored/cfn/taxdocs-observability-dev.yaml
+#
+# AUTHOR-AND-DEFEND ONLY -- NOT deployed to real AWS in this exercise. No
+# `aws cloudformation deploy`/`create-stack` has been run against a real AWS
+# account for this template. A CloudFormation-emulator's synthetic
+# CREATE_COMPLETE (e.g. from a local stack emulator) is NOT proof that an
+# AWS::XRay::SamplingRule actually samples traces correctly -- X-Ray's
+# reservoir/fixed-rate sampling algorithm runs inside the real AWS X-Ray
+# service, which no local emulator faithfully reproduces.
+#
+# W6D2 Task 4: X-Ray is AWS-native (there is no X-Ray equivalent to run on
+# k3d), so this sampling rule is authored and reasoned about here, not
+# proven live.
+#
+# ReservoirSize: 10 guarantees at least 10 traces/second are sampled
+# unconditionally, regardless of FixedRate -- so a quiet traffic window
+# still captures the first few traces of an incident as it starts, instead
+# of waiting for volume to build up before FixedRate's percentage-based
+# sampling kicks in.
+#
+# FixedRate: 0.05 samples an additional 5% of requests above the reservoir
+# floor. NEVER FixedRate: 0 -- a rate of 0 means once the reservoir is
+# exhausted, no further requests are sampled at all for the rest of that
+# second, so a sustained error spike or slow-request incident would be
+# invisible in X-Ray beyond its first 10 traces/second, defeating the
+# entire point of having tracing in production.
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  taxdocs-api X-Ray sampling rule (author-and-defend; not deployed to real
+  AWS as part of this exercise).
+Resources:
+  TaxdocsSamplingRule:
+    Type: AWS::XRay::SamplingRule
+    Properties:
+      SamplingRule:
+        RuleName: taxdocs-api-default
+        Priority: 1000
+        ReservoirSize: 10
+        FixedRate: 0.05
+        ServiceName: taxdocs-api
+        ServiceType: "*"
+        Host: "*"
+        HTTPMethod: "*"
+        URLPath: "*"
+        ResourceARN: "*"
+        Version: 1
