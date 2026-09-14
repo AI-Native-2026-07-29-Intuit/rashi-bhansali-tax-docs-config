@@ -1,0 +1,68 @@
+# k8s/aws-authored/adot-collector.yaml
+#
+# AUTHOR-AND-DEFEND ONLY -- NOT applied to k3d. The Tempo half of this
+# config (otlphttp/tempo) IS locally runnable -- it targets the same W5D5
+# Tempo endpoint taxdocs-api already exports to in the k3d cluster, and
+# nothing here changes that. The awsxray half needs a real AWS account
+# (an X-Ray API endpoint, IAM credentials, an ADOT collector pod running
+# with a real AWS identity) -- it has NOT been started or exercised in
+# this exercise, and no span has ever actually reached AWS X-Ray from this
+# work.
+#
+# W6D2 Task 4: dual-exporting the same OTLP trace stream to both sinks
+# keeps taxdocs-api's own OTel SDK instrumentation vendor-neutral --
+# app code emits plain OTLP and knows nothing about X-Ray. Switching,
+# adding, or removing a trace backend is a collector config change here,
+# never an application redeploy or a dependency the app code has to carry.
+# In particular, app code must NOT depend on the AWS X-Ray SDK directly
+# (no `aws-xray-sdk` import, no X-Ray-specific trace-ID format baked into
+# application code) -- the ADOT collector's awsxray exporter translates
+# standard OTLP spans into X-Ray's wire format at the collector boundary,
+# not in the app.
+#
+# X-Ray's actual value here is downstream of what this repo's app code
+# touches directly: AWS-side spans for services taxdocs-api's own OTel SDK
+# has no visibility into on its own -- e.g. the KEDA-scaled worker's
+# SQS ReceiveMessage/DeleteMessage calls (Task 4's SQS ScaledObject
+# variant) and RDS/Aurora query-level spans, both of which AWS's own
+# SDKs and X-Ray's service-map integration instrument automatically once
+# deployed on real AWS. It is emphatically NOT meant to trace the
+# outbound Anthropic HTTPS call in LlmProxyController/SpringAiLlmUpstream
+# -- that's a third-party API call over the public internet, not an
+# AWS-managed service X-Ray has any special integration with; Tempo (via
+# the OTel SDK's own HTTP client instrumentation) is the correct and
+# sufficient backend for that span today, on both k3d and any future AWS
+# deployment.
+apiVersion: opentelemetry.io/v1alpha1
+kind: OpenTelemetryCollector
+metadata:
+  name: adot-collector
+  namespace: observability
+spec:
+  image: public.ecr.aws/aws-observability/aws-otel-collector:latest
+  mode: deployment
+  config: |
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+    exporters:
+      # Runs locally today -- same Tempo Service taxdocs-api's OTel SDK
+      # already exports to on k3d (W5D5).
+      otlphttp/tempo:
+        endpoint: http://tempo.observability.svc.cluster.local:4318
+        tls:
+          insecure: true
+      # Needs a real AWS account + IAM identity for this collector pod
+      # (e.g. an EKS IRSA role with xray:PutTraceSegments) -- never
+      # exercised in this exercise.
+      awsxray:
+        region: us-east-1
+    service:
+      pipelines:
+        traces:
+          receivers: [otlp]
+          exporters: [otlphttp/tempo, awsxray]

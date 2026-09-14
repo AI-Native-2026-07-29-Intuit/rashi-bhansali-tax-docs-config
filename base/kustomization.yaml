@@ -11,5 +11,8 @@ resources:
   - 40-taxdocs-api.secret.yaml
   - 45-taxdocs-api.anthropic.secret.yaml
   - 50-taxdocs-api.hpa.yaml
+  - 55-taxdocs-api.pdb.yaml
   - 60-taxdocs-api.ingress.yaml
   - 70-taxdocs-api.servicemonitor.yaml
+  - 80-taxdocs-worker.deployment.yaml
+  - 85-taxdocs-worker.scaledobject.yaml

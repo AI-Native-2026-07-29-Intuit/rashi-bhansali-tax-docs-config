@@ -1,0 +1,78 @@
+# k8s/aws-authored/karpenter-nodepool.yaml
+#
+# AUTHOR-AND-DEFEND ONLY -- NOT applied to k3d, and never proven against real
+# AWS in this exercise. Karpenter provisions and terminates real EC2
+# instances against the AWS API; there is no equivalent controller on k3d,
+# and no CloudFormation/Terraform apply against a real AWS account backs
+# this file. Treat every claim below as a design decision to be reviewed,
+# not a validated result.
+#
+# W6D2 Task 4: the production node-provisioning layer taxdocs-api's worker
+# (Task 1) and HPA (Task 2) would run on if this were a managed EKS cluster
+# instead of k3d.
+#
+# apiVersion karpenter.sh/v1 (not the reference shape's implied v1beta1):
+# Karpenter's v1 NodePool API requires nodeClassRef.group and .kind, not
+# just .name -- unverified against a real Karpenter install here (no
+# cluster to apply this against), called out explicitly rather than
+# silently carried over from the reference.
+#
+# Spot + On-Demand across three AZs: spreads the KEDA worker's burst
+# capacity (Task 1, maxReplicaCount: 20) and taxdocs-api's HPA-driven
+# capacity (Task 2, maxReplicas: 30) across failure domains and pricing
+# tiers, so a single AZ outage or a Spot capacity crunch in one AZ doesn't
+# take down the whole fleet.
+#
+# limits.cpu/memory cap the runaway-HPA blast radius: Task 2's HPA can in
+# principle ask for up to 30 taxdocs-api pods plus up to 20
+# taxdocs-api-worker pods (Task 1) simultaneously -- e.g. a genuine traffic
+# spike stacked on top of a Kafka backlog spike. Without a NodePool-level
+# resource ceiling, Karpenter would keep provisioning EC2 capacity to
+# satisfy every one of those pods, turning a legitimate scaling event (or a
+# misconfigured/compromised client hammering the API) into an unbounded AWS
+# bill. limits: {cpu: "200", memory: 400Gi} caps total provisioned capacity
+# regardless of how high the HPA/KEDA ask goes -- pods beyond the limit
+# stay Pending instead of provisioning infinite nodes.
+#
+# consolidateAfter: 600s is deliberately the same window as Task 2's HPA
+# scaleDown.stabilizationWindowSeconds (base/50-taxdocs-api.hpa.yaml) --
+# Karpenter doesn't start consolidating a node until the HPA has already
+# had its full 10-minute anti-flap window to decide it actually wants fewer
+# pods, so consolidation reacts to a settled replica count, not a
+# momentary dip mid-flap.
+#
+# Task 2's PodDisruptionBudget (base/55-taxdocs-api.pdb.yaml, minAvailable:
+# 2) is what keeps consolidation safe: WhenEmptyOrUnderutilized lets
+# Karpenter evict/reschedule pods off an underutilized node to consolidate
+# it onto fewer nodes, and the eviction API respects PDBs -- Karpenter
+# cannot evict a taxdocs-api pod if doing so would drop available replicas
+# below 2. Consolidation without that PDB could stack every remaining
+# taxdocs-api pod's eviction onto too few nodes at once and briefly take
+# the service below its serving floor.
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: taxdocs-mixed
+spec:
+  template:
+    spec:
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["m5.large", "m5.xlarge", "m6i.large"]
+        - key: topology.kubernetes.io/zone
+          operator: In
+          values: ["us-east-1a", "us-east-1b", "us-east-1c"]
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: default
+  disruption:
+    consolidationPolicy: WhenEmptyOrUnderutilized
+    consolidateAfter: 600s
+  limits:
+    cpu: "200"
+    memory: 400Gi

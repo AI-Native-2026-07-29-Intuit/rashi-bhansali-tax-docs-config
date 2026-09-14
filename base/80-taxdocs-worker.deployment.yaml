@@ -1,0 +1,63 @@
+# base/80-taxdocs-worker.deployment.yaml
+# W6D2 Task 1: the KEDA scale target. Same image as taxdocs-api, run in the
+# `worker` Spring profile: consumes documents.events, re-projects the Mongo
+# read model exactly as DocumentIngestedListener does for taxdocs-api, serves
+# no HTTP (spring.main.web-application-type: none, application.yml).
+#
+# replicas: 0 deliberately -- base/85-taxdocs-worker.scaledobject.yaml's KEDA
+# ScaledObject owns this Deployment's replica count from here. Do NOT add a
+# Kustomize `replicas:` patch for this Deployment in any overlay -- that's the
+# same "two controllers fighting over spec.replicas" trap the taxdocs-api HPA
+# note in overlays/dev/kustomization.yaml already documents.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: taxdocs-api-worker
+  namespace: taxdocs-dev
+  labels:
+    app.kubernetes.io/name: taxdocs-api-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  replicas: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: taxdocs-api-worker
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: taxdocs-api-worker
+        app.kubernetes.io/component: worker
+        app.kubernetes.io/part-of: taxdocs
+        app.kubernetes.io/managed-by: kubectl
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+      containers:
+        - name: worker
+          image: uptimecrew/taxdocs-api:0.1.1
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: taxdocs-api-config
+            - secretRef:
+                name: taxdocs-api-secrets
+          env:
+            # Overrides the ConfigMap's SPRING_PROFILES_ACTIVE (k8s) for this Deployment
+            # only -- worker disables the HTTP server (application.yml) and excludes
+            # SecurityConfig (Spring Security's SecurityFilterChain needs a servlet-stack
+            # HandlerMappingIntrospector bean that doesn't exist with no web server).
+            - name: SPRING_PROFILES_ACTIVE
+              value: worker
+          # No ports, no startup/liveness/readiness HTTP probes -- there is no HTTP server
+          # to probe. Liveness is process-exists; a wedged consumer is caught by KEDA lag
+          # staying nonzero (still-inflight lag with no active pod triggers scale-up again)
+          # rather than a Kubernetes probe.
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              memory: 1Gi

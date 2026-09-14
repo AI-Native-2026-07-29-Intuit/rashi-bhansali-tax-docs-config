@@ -1,0 +1,38 @@
+# base/85-taxdocs-worker.scaledobject.yaml
+# W6D2 Task 1 (RUNNABLE on k3d): KEDA scales taxdocs-api-worker on the
+# taxdocs-read-model-builder consumer group's lag against documents.events.
+# lagThreshold: "10" means KEDA's generated HPA targets 10 messages of lag
+# per pod -- e.g. 73 messages of lag scales to ceil(73/10) = 8 pods (the same
+# ceil math the Task 4 SQS queueLength variant uses on a managed cluster).
+#
+# bootstrapServers matches kafka.taxdocs-dev.svc.cluster.local:9092 (verified
+# against `kubectl -n taxdocs-dev get svc kafka`, the same in-cluster Kafka
+# Service taxdocs-api itself uses). Plaintext, in-cluster -- no
+# TriggerAuthentication; that credential-placement discipline only applies to
+# the Task 4 SQS variant (k8s/aws-authored/, author-and-defend only, not
+# applied here).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: taxdocs-worker-scaledobject
+  namespace: taxdocs-dev
+  labels:
+    app.kubernetes.io/name: taxdocs-api-worker
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: taxdocs
+    app.kubernetes.io/managed-by: kubectl
+spec:
+  scaleTargetRef:
+    name: taxdocs-api-worker
+  minReplicaCount: 0
+  maxReplicaCount: 20
+  pollingInterval: 15
+  cooldownPeriod: 300
+  triggers:
+    - type: kafka
+      metadata:
+        bootstrapServers: kafka.taxdocs-dev.svc.cluster.local:9092
+        consumerGroup: taxdocs-read-model-builder
+        topic: documents.events
+        lagThreshold: "10"
+        offsetResetPolicy: latest

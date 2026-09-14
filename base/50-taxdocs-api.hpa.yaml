@@ -1,12 +1,14 @@
-# manifests/50-taxdocs-api.hpa.yaml - autoscale on CPU.
-# autoscaling/v2 (NOT v1; v1 is CPU-only and missing the behavior block).
-# Targets 70% of the container's `resources.requests.cpu`. Min 2 keeps
-# the service highly-available; max 5 caps blast radius in the lab.
-
+# base/50-taxdocs-api.hpa.yaml
+# W6D2 Task 2: autoscale on taxdocs_inflight_requests (a custom Prometheus
+# metric via the Prometheus Adapter), NOT CPU. CPU-based scaling is blind to
+# LLM-API-bound latency -- the pod is waiting on the network, CPU stays low
+# while p99 climbs and in-flight requests pile up. averageValue: 8 comes from
+# a single-replica saturation test ramped to the 500ms p99 SLO
+# (reference/SRE-CAPSTONE.md).
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: taxdocs-api
+  name: taxdocs-api-hpa
   namespace: taxdocs-dev
   labels:
     app.kubernetes.io/name: taxdocs-api
@@ -19,23 +21,23 @@ spec:
     kind:       Deployment
     name:       taxdocs-api
   minReplicas: 2
-  maxReplicas: 5
+  maxReplicas: 30
   metrics:
-    - type: Resource
-      resource:
-        name: cpu
+    - type: Pods
+      pods:
+        metric:
+          name: taxdocs_inflight_requests
         target:
-          type:               Utilization
-          averageUtilization: 70
+          type:         AverageValue
+          averageValue: "8"
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 0          # react fast on burst
       policies:
-        - { type: Percent, value: 100, periodSeconds: 15 }
-        - { type: Pods,    value: 2,   periodSeconds: 60 }
+        - { type: Percent, value: 100, periodSeconds: 60 }
       selectPolicy: Max
     scaleDown:
-      stabilizationWindowSeconds: 300        # 5-minute cool-down (anti-flap)
+      stabilizationWindowSeconds: 600        # outlast a bursty dip
       policies:
         - { type: Percent, value: 25, periodSeconds: 60 }
       selectPolicy: Min
