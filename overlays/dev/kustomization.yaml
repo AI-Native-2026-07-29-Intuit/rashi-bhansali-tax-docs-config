@@ -69,3 +69,15 @@ patches:
       - op: replace
         path: /spec/minReplicas
         value: 1
+  # PDB's base minAvailable: 2 (base/55-taxdocs-api.pdb.yaml) assumes the HPA
+  # floor above -- dev intentionally rests at 1 replica, so a base-inherited
+  # minAvailable: 2 could never be satisfied here, blocking every voluntary
+  # disruption (node drain, kubectl drain during local cluster work). Lower
+  # dev's PDB floor to match its actual replica floor.
+  - target:
+      kind: PodDisruptionBudget
+      name: taxdocs-api-pdb
+    patch: |-
+      - op: replace
+        path: /spec/minAvailable
+        value: 1
